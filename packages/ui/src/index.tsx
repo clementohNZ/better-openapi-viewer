@@ -5,7 +5,9 @@ import {
   generateCurlSnippet,
   getMediaTypeExample,
   getOperations,
+  getSecuritySchemes,
   groupOperationsByTag,
+  type BasicAuthCredentials,
   type HttpMethod,
   type MediaTypeObject,
   type NormalizedOperation,
@@ -15,16 +17,20 @@ import {
   type ReferenceObject,
   type RequestBodyObject,
   type SerializableParameterValue,
+  type SecurityCredential,
   type SecurityRequirementObject,
+  type SecuritySchemeObject,
   type ServerObject,
+  type TryItOutAuthCredentials,
   type TryItOutRequest,
 } from '@better-openapi-viewer/core';
 
 export type BetterOpenApiViewerProps = {
   document: OpenAPIObject;
+  persistAuthorization?: boolean;
 };
 
-export function BetterOpenApiViewer({ document }: BetterOpenApiViewerProps) {
+export function BetterOpenApiViewer({ document, persistAuthorization = false }: BetterOpenApiViewerProps) {
   const [query, setQuery] = useState('');
   const [selectedMethods, setSelectedMethods] = useState<HttpMethod[]>([]);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -33,6 +39,10 @@ export function BetterOpenApiViewer({ document }: BetterOpenApiViewerProps) {
   const [selectedContentTypes, setSelectedContentTypes] = useState<string[]>([]);
   const [expandedOperations, setExpandedOperations] = useState<Set<string>>(() => new Set());
   const operations = useMemo(() => getOperations(document), [document]);
+  const securitySchemes = useMemo(() => getSupportedSecuritySchemes(document), [document]);
+  const [authCredentials, setAuthCredentials] = useState<TryItOutAuthCredentials>(() =>
+    persistAuthorization ? readPersistedAuthCredentials(document) : {},
+  );
   const methodOptions = useMemo(() => getCountedOptions(operations, (operation) => [operation.method]), [operations]);
   const tagOptions = useMemo(() => getCountedOptions(operations, (operation) => operation.tags), [operations]);
   const contentTypeOptions = useMemo(() => getCountedOptions(operations, (operation) => operation.contentTypes), [operations]);
@@ -95,6 +105,13 @@ export function BetterOpenApiViewer({ document }: BetterOpenApiViewerProps) {
     setDeprecatedFilter('any');
     setSelectedContentTypes([]);
   };
+  const updateAuthCredentials = (credentials: TryItOutAuthCredentials) => {
+    setAuthCredentials(credentials);
+
+    if (persistAuthorization) {
+      writePersistedAuthCredentials(document, credentials);
+    }
+  };
 
   return (
     <main>
@@ -103,6 +120,13 @@ export function BetterOpenApiViewer({ document }: BetterOpenApiViewerProps) {
         <h1>{document.info?.title ?? 'OpenAPI'}</h1>
         {document.info?.description ? <p>{document.info.description}</p> : null}
       </header>
+
+      <AuthorizePanel
+        credentials={authCredentials}
+        onChange={updateAuthCredentials}
+        persistAuthorization={persistAuthorization}
+        schemes={securitySchemes}
+      />
 
       <section aria-labelledby="endpoint-navigation-heading">
         <h2 id="endpoint-navigation-heading">Endpoints</h2>
@@ -259,9 +283,9 @@ export function BetterOpenApiViewer({ document }: BetterOpenApiViewerProps) {
                           <Parameters parameters={operation.parameters} />
                           <UnknownObjectSection title="Request body" value={operation.requestBody} emptyMessage="No request body." />
                           <UnknownRecordSection title="Responses" value={operation.responses} emptyMessage="No responses documented." />
-                          <Security security={operation.security} />
+                          <Security security={operation.security} schemes={securitySchemes} />
                           <Servers servers={operation.servers} />
-                          <TryItOut operation={operation} document={document} />
+                          <TryItOut authCredentials={authCredentials} operation={operation} document={document} />
                         </div>
                       ) : null}
                     </article>
@@ -406,7 +430,136 @@ function Parameters({ parameters }: { parameters: Array<ParameterObject | Refere
   );
 }
 
-function Security({ security }: { security: SecurityRequirementObject[] }) {
+function AuthorizePanel({
+  credentials,
+  onChange,
+  persistAuthorization,
+  schemes,
+}: {
+  credentials: TryItOutAuthCredentials;
+  onChange: (credentials: TryItOutAuthCredentials) => void;
+  persistAuthorization: boolean;
+  schemes: Record<string, SecuritySchemeObject>;
+}) {
+  const schemeEntries = Object.entries(schemes);
+  const credentialCount = Object.values(credentials).filter(Boolean).length;
+
+  const updateCredential = (schemeName: string, credential: SecurityCredential | undefined) => {
+    const next = { ...credentials };
+
+    if (isEmptyCredential(credential)) {
+      delete next[schemeName];
+    } else {
+      next[schemeName] = credential;
+    }
+
+    onChange(next);
+  };
+
+  const clearAll = () => onChange({});
+
+  return (
+    <section aria-labelledby="authorize-heading">
+      <h2 id="authorize-heading">Authorize</h2>
+      {schemeEntries.length ? (
+        <details>
+          <summary>
+            Credentials configured for {credentialCount} of {schemeEntries.length} security schemes
+          </summary>
+          {persistAuthorization ? <p>Credentials are stored in localStorage for this API document.</p> : null}
+          <div role="group" aria-labelledby="authorize-heading">
+            {schemeEntries.map(([schemeName, scheme]) => (
+              <SecuritySchemeCredentialField
+                key={schemeName}
+                credential={credentials[schemeName]}
+                name={schemeName}
+                onChange={(credential) => updateCredential(schemeName, credential)}
+                scheme={scheme}
+              />
+            ))}
+          </div>
+          <button type="button" onClick={clearAll} disabled={!credentialCount}>
+            Clear all credentials
+          </button>
+        </details>
+      ) : (
+        <p>No supported security schemes found.</p>
+      )}
+    </section>
+  );
+}
+
+function SecuritySchemeCredentialField({
+  credential,
+  name,
+  onChange,
+  scheme,
+}: {
+  credential: SecurityCredential | undefined;
+  name: string;
+  onChange: (credential: SecurityCredential | undefined) => void;
+  scheme: SecuritySchemeObject;
+}) {
+  const id = `auth-${toDomId(name)}`;
+  const descriptionId = scheme.description ? `${id}-description` : undefined;
+  const schemeLabel = getSecuritySchemeLabel(scheme);
+
+  if (scheme.type === 'http' && scheme.scheme?.toLowerCase() === 'basic') {
+    const basicCredential = isBasicCredential(credential) ? credential : { username: '', password: '' };
+
+    return (
+      <fieldset>
+        <legend>
+          {name} ({schemeLabel})
+        </legend>
+        {scheme.description ? <p id={descriptionId}>{scheme.description}</p> : null}
+        <label>
+          Username
+          <input
+            autoComplete="username"
+            aria-describedby={descriptionId}
+            value={basicCredential.username}
+            onChange={(event) => onChange({ ...basicCredential, username: event.currentTarget.value })}
+          />
+        </label>
+        <label>
+          Password
+          <input
+            autoComplete="current-password"
+            aria-describedby={descriptionId}
+            type="password"
+            value={basicCredential.password}
+            onChange={(event) => onChange({ ...basicCredential, password: event.currentTarget.value })}
+          />
+        </label>
+        <button type="button" onClick={() => onChange(undefined)} disabled={!credential}>
+          Clear {name}
+        </button>
+      </fieldset>
+    );
+  }
+
+  return (
+    <div>
+      <label>
+        {name} ({schemeLabel})
+        <input
+          aria-describedby={descriptionId}
+          autoComplete="off"
+          type="password"
+          value={typeof credential === 'string' ? credential : isValueCredential(credential) ? credential.value : ''}
+          onChange={(event) => onChange(event.currentTarget.value)}
+        />
+      </label>
+      {scheme.description ? <span id={descriptionId}>{scheme.description}</span> : null}
+      <button type="button" onClick={() => onChange(undefined)} disabled={!credential}>
+        Clear {name}
+      </button>
+    </div>
+  );
+}
+
+function Security({ security, schemes }: { security: SecurityRequirementObject[]; schemes: Record<string, SecuritySchemeObject> }) {
   return (
     <section>
       <h4>Security</h4>
@@ -414,7 +567,19 @@ function Security({ security }: { security: SecurityRequirementObject[] }) {
         <ul>
           {security.map((requirement, index) => (
             <li key={index}>
-              <UnknownValue value={requirement} />
+              {Object.keys(requirement).length ? (
+                <ul>
+                  {Object.entries(requirement).map(([schemeName, scopes]) => (
+                    <li key={schemeName}>
+                      <code>{schemeName}</code>
+                      {schemes[schemeName] ? ` (${getSecuritySchemeLabel(schemes[schemeName])})` : null}
+                      {scopes.length ? ` scopes: ${scopes.join(', ')}` : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <span>Anonymous access allowed.</span>
+              )}
             </li>
           ))}
         </ul>
@@ -465,13 +630,21 @@ type TryItOutState = {
   isSending: boolean;
 };
 
-function TryItOut({ operation, document }: { operation: NormalizedOperation; document: OpenAPIObject }) {
+function TryItOut({
+  authCredentials,
+  operation,
+  document,
+}: {
+  authCredentials: TryItOutAuthCredentials;
+  operation: NormalizedOperation;
+  document: OpenAPIObject;
+}) {
   const initialState = useMemo(() => createTryItOutState(operation), [operation]);
   const [state, setState] = useState<TryItOutState>(initialState);
   const parameterFields = useMemo(() => operation.parameters.filter((parameter): parameter is ParameterObject => !isReferenceObject(parameter)), [operation.parameters]);
   const request = useMemo(
-    () => buildTryItOutRequestForState({ document, operation, state }),
-    [document, operation, state.bodyFormat, state.bodyText, state.contentType, state.parameters, state.serverUrl],
+    () => buildTryItOutRequestForState({ authCredentials, document, operation, state }),
+    [authCredentials, document, operation, state.bodyFormat, state.bodyText, state.contentType, state.parameters, state.serverUrl],
   );
 
   const updateParameter = (name: string, value: string) => {
@@ -772,10 +945,12 @@ function createTryItOutState(operation: NormalizedOperation): TryItOutState {
 }
 
 function buildTryItOutRequestForState({
+  authCredentials,
   document,
   operation,
   state,
 }: {
+  authCredentials: TryItOutAuthCredentials;
   document: OpenAPIObject;
   operation: NormalizedOperation;
   state: TryItOutState;
@@ -787,6 +962,7 @@ function buildTryItOutRequestForState({
     parameters: parseParameters(state.parameters),
     body: state.contentType ? parseBody(state.bodyText, state.bodyFormat) : undefined,
     contentType: state.contentType || undefined,
+    auth: authCredentials,
   });
 }
 
@@ -855,6 +1031,104 @@ function getRequestBodyMediaTypes(operation: NormalizedOperation): Record<string
 
 function getServerOptions(operation: NormalizedOperation) {
   return operation.servers.length ? operation.servers : [{ url: '' }];
+}
+
+function getSupportedSecuritySchemes(document: OpenAPIObject): Record<string, SecuritySchemeObject> {
+  const schemes = getSecuritySchemes(document);
+  const supportedEntries = Object.entries(schemes).filter((entry): entry is [string, SecuritySchemeObject] => isSupportedSecurityScheme(entry[1]));
+
+  return Object.fromEntries(supportedEntries);
+}
+
+function isSupportedSecurityScheme(value: unknown): value is SecuritySchemeObject {
+  if (!value || typeof value !== 'object' || isReferenceObject(value) || !('type' in value)) {
+    return false;
+  }
+
+  const scheme = value as SecuritySchemeObject;
+  const httpScheme = scheme.scheme?.toLowerCase();
+
+  return (
+    (scheme.type === 'http' && (httpScheme === 'basic' || httpScheme === 'bearer')) ||
+    (scheme.type === 'apiKey' && Boolean(scheme.name) && (scheme.in === 'header' || scheme.in === 'query' || scheme.in === 'cookie'))
+  );
+}
+
+function getSecuritySchemeLabel(scheme: SecuritySchemeObject) {
+  if (scheme.type === 'http') {
+    const httpScheme = scheme.scheme?.toLowerCase();
+
+    if (httpScheme === 'bearer') {
+      return scheme.bearerFormat ? `bearer ${scheme.bearerFormat}` : 'bearer';
+    }
+
+    return httpScheme ?? 'http';
+  }
+
+  if (scheme.type === 'apiKey') {
+    return `api key in ${scheme.in}`;
+  }
+
+  return scheme.type;
+}
+
+function isEmptyCredential(credential: SecurityCredential | undefined) {
+  if (!credential) {
+    return true;
+  }
+
+  if (typeof credential === 'string') {
+    return !credential.trim();
+  }
+
+  if (isBasicCredential(credential)) {
+    return !credential.username.trim() && !credential.password;
+  }
+
+  return !credential.value.trim();
+}
+
+function isBasicCredential(credential: SecurityCredential | undefined): credential is BasicAuthCredentials {
+  return Boolean(credential) && typeof credential === 'object' && 'username' in credential && 'password' in credential;
+}
+
+function isValueCredential(credential: SecurityCredential | undefined): credential is { value: string } {
+  return Boolean(credential) && typeof credential === 'object' && 'value' in credential;
+}
+
+function readPersistedAuthCredentials(document: OpenAPIObject): TryItOutAuthCredentials {
+  if (typeof window === 'undefined') {
+    return {};
+  }
+
+  try {
+    const value = window.localStorage.getItem(getAuthStorageKey(document));
+    return value ? (JSON.parse(value) as TryItOutAuthCredentials) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writePersistedAuthCredentials(document: OpenAPIObject, credentials: TryItOutAuthCredentials) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    const storageKey = getAuthStorageKey(document);
+
+    if (Object.values(credentials).some(Boolean)) {
+      window.localStorage.setItem(storageKey, JSON.stringify(credentials));
+    } else {
+      window.localStorage.removeItem(storageKey);
+    }
+  } catch {
+    // Ignore storage failures so private browsing or restricted storage cannot block requests.
+  }
+}
+
+function getAuthStorageKey(document: OpenAPIObject) {
+  return `better-openapi-viewer:auth:${document.info?.title ?? 'OpenAPI'}:${document.info?.version ?? ''}`;
 }
 
 function isRequestBodyObject(value: unknown): value is RequestBodyObject {
