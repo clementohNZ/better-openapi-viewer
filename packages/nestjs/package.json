@@ -29,6 +29,7 @@
   },
   "dependencies": {
     "@better-openapi-viewer/core": "0.1.0",
+    "@better-openapi-viewer/ui": "0.1.0",
     "@nestjs/swagger": "^11.4.2"
   },
   "peerDependencies": {

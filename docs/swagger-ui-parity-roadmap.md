@@ -10,7 +10,7 @@ This project should treat the OpenAPI document as the source of truth. The core 
 - [x] Resolve internal `$ref` pointers.
 - [x] Resolve external `$ref` pointers where browser and server configuration allow it.
 - [x] Show useful loading, parse, validation, and unsupported-version errors.
-- [ ] Support multiple specs or grouped definitions when an app exposes more than one document.
+- [x] Support multiple specs or grouped definitions when an app exposes more than one document.
 - [x] Preserve vendor extensions such as `x-*` fields for later rendering and plugins.
 
 ## 2. Navigation And Discovery
@@ -27,7 +27,7 @@ This project should treat the OpenAPI document as the source of truth. The core 
 
 ## 3. Operation Documentation
 
-- [ ] Render Markdown descriptions.
+- [x] Render Markdown descriptions.
 - [x] Show operation summary and full description.
 - [x] Show external docs links.
 - [x] Show deprecation warnings.
@@ -43,7 +43,7 @@ This project should treat the OpenAPI document as the source of truth. The core 
 - [x] Render primitive, array, object, enum, and composed parameter schemas.
 - [x] Support parameter examples and example values.
 - [x] Support OpenAPI serialization styles: `form`, `simple`, `matrix`, `label`, `spaceDelimited`, `pipeDelimited`, and `deepObject`.
-- [ ] Validate parameter input before sending a request.
+- [x] Validate parameter input before sending a request.
 - [x] Encode parameters correctly into URL paths, query strings, headers, and cookies.
 
 ## 5. Request Bodies
@@ -52,10 +52,10 @@ This project should treat the OpenAPI document as the source of truth. The core 
 - [x] Support required and optional request bodies.
 - [x] Support multiple media types such as `application/json`, `multipart/form-data`, `application/x-www-form-urlencoded`, `text/plain`, and binary uploads.
 - [x] Generate editable example payloads from schema examples, explicit examples, defaults, and schema shape.
-- [ ] Render schema-aware forms for request bodies.
+- [x] Render schema-aware forms for request bodies.
 - [x] Support raw body editing.
-- [ ] Validate request bodies before sending.
-- [ ] Support file upload fields.
+- [x] Validate request bodies before sending.
+- [x] Support file upload fields.
 - [x] Support arrays, nested objects, maps, enums, nullable values, and composition.
 
 ## 6. Schemas And Models
@@ -111,13 +111,13 @@ This project should treat the OpenAPI document as the source of truth. The core 
 - [x] Support alternative auth choices when OpenAPI allows them.
 - [x] Persist auth optionally.
 - [x] Clear auth globally and per scheme.
-- [ ] Preauthorize credentials through package configuration.
+- [x] Preauthorize credentials through package configuration.
 - [x] Attach auth credentials correctly during Try It Out requests.
 
 ## 10. Server Selection
 
 - [x] Render root, path-level, and operation-level servers.
-- [ ] Support server variables and defaults.
+- [x] Support server variables and defaults.
 - [x] Allow switching the active server.
 - [x] Apply selected server to Try It Out requests.
 - [x] Handle relative server URLs for same-origin NestJS apps.
@@ -155,9 +155,9 @@ This project should treat the OpenAPI document as the source of truth. The core 
 - [x] Expose the OpenAPI JSON endpoint.
 - [x] Allow mounting under any route prefix.
 - [x] Work with global prefixes.
-- [ ] Work with Express and Fastify adapters.
+- [x] Work with Express and Fastify adapters.
 - [x] Allow users to keep the standard Swagger UI route if they want both UIs.
-- [ ] Support static asset serving for the bundled UI.
+- [x] Support static asset serving for the bundled UI.
 - [x] Support app lifecycle timing where the OpenAPI document is created after modules initialize.
 
 ## Suggested Implementation Order

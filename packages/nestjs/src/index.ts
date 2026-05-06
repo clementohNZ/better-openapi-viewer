@@ -1,5 +1,9 @@
+import { readFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import type { INestApplication } from '@nestjs/common';
 import type { OpenAPIObject } from '@better-openapi-viewer/core';
+
+const require = createRequire(import.meta.url);
 
 export type BetterOpenApiViewerDocumentFactory = () => OpenAPIObject | Promise<OpenAPIObject>;
 
@@ -44,10 +48,15 @@ export function setupBetterOpenApiViewer(app: INestApplication, options: BetterO
   const specs = createSpecEntries(options, uiPath);
   const staticAssets = options.staticAssets || undefined;
   const assetPath = normalizeRoute(staticAssets?.path ?? `${uiPath}/assets`);
+  const bundledViewerAssetPath = `/${assetPath}/viewer.js`;
 
   if (staticAssets) {
     staticAssets.serve?.({ app, path: `/${assetPath}` });
   }
+
+  registerGet(app, bundledViewerAssetPath, async (_request, response) => {
+    sendJavaScript(response, await readFile(require.resolve('@better-openapi-viewer/ui/browser'), 'utf8'));
+  });
 
   specs.forEach((spec) => {
     registerGet(app, `/${spec.jsonPath}`, async (_request, response) => {
@@ -59,13 +68,13 @@ export function setupBetterOpenApiViewer(app: INestApplication, options: BetterO
     .filter((spec) => spec.uiPath !== uiPath)
     .forEach((spec) => {
       registerGet(app, `/${spec.uiPath}`, async (_request, response) => {
-        sendHtml(response, renderViewerHtmlForSpec(spec, specs, options, assetPath, await spec.getDocument()));
+        sendHtml(response, renderViewerHtmlForSpec(spec, specs, options, bundledViewerAssetPath, await spec.getDocument()));
       });
     });
 
   registerGet(app, `/${uiPath}`, async (_request, response) => {
     const spec = specs[0] as SpecEntry;
-    sendHtml(response, renderViewerHtmlForSpec(spec, specs, options, assetPath, await spec.getDocument()));
+    sendHtml(response, renderViewerHtmlForSpec(spec, specs, options, bundledViewerAssetPath, await spec.getDocument()));
   });
 }
 
@@ -169,7 +178,7 @@ function renderViewerHtmlForSpec(
   spec: SpecEntry,
   specs: SpecEntry[],
   options: BetterOpenApiViewerOptions,
-  assetPath: string,
+  bundledViewerAssetPath: string,
   document: OpenAPIObject,
 ) {
   return renderViewerHtml({
@@ -180,7 +189,7 @@ function renderViewerHtmlForSpec(
       path: `/${item.uiPath}`,
       jsonPath: `/${item.jsonPath}`,
     })),
-    assetPath: `/${assetPath}`,
+    bundledViewerAssetPath,
     customCss: options.customCss,
     customCssUrl: options.customCssUrl,
     customJs: options.customJs,
@@ -215,7 +224,7 @@ function renderViewerHtml({
   jsonPath,
   title,
   specs,
-  assetPath,
+  bundledViewerAssetPath,
   customCss,
   customCssUrl,
   customJs,
@@ -226,7 +235,7 @@ function renderViewerHtml({
   jsonPath: string;
   title: string;
   specs: Array<{ name: string; path: string; jsonPath: string }>;
-  assetPath: string;
+  bundledViewerAssetPath: string;
   customCss?: string;
   customCssUrl?: string | string[];
   customJs?: string;
@@ -241,7 +250,7 @@ function renderViewerHtml({
     persistAuthorization: boolean;
   };
 }) {
-  const serializedConfig = JSON.stringify({ jsonPath, specs, assetPath, ...config }).replace(/</g, '\\u003c');
+  const serializedConfig = JSON.stringify({ jsonPath, specs, ...config }).replace(/</g, '\\u003c');
   const escapedTitle = escapeHtml(title);
   const specLinks =
     specs.length > 1
@@ -280,103 +289,18 @@ function renderViewerHtml({
     </style>
   </head>
   <body>
-    <main>
-      ${specLinks}
-      <p class="muted">OpenAPI document: <a href="${jsonPath}">${jsonPath}</a></p>
-      <h1 id="title">Better OpenAPI Viewer</h1>
-      <p id="description" class="muted"></p>
-      <input id="search" type="search" placeholder="Search endpoints" autocomplete="off" />
-      <p id="count" class="muted"></p>
-      <p id="status" class="muted" role="status">Loading OpenAPI document...</p>
-      <ul id="endpoints"></ul>
-    </main>
+    <div data-better-openapi-viewer-root>
+      <main>
+        ${specLinks}
+        <p class="muted">OpenAPI document: <a href="${jsonPath}">${jsonPath}</a></p>
+        <h1>${escapedTitle}</h1>
+        <p class="muted" role="status">Loading Better OpenAPI Viewer...</p>
+      </main>
+    </div>
     <script>
       window.__BETTER_OPENAPI_VIEWER_CONFIG__ = ${serializedConfig};
-      const httpMethods = ['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace'];
-      const state = { endpoints: [] };
-      const list = document.querySelector('#endpoints');
-      const search = document.querySelector('#search');
-      const count = document.querySelector('#count');
-      const status = document.querySelector('#status');
-
-      function render() {
-        const query = search.value.trim().toLowerCase();
-        const matches = state.endpoints.filter((endpoint) =>
-          endpoint.searchText.includes(query)
-        );
-        count.textContent = matches.length + ' endpoint' + (matches.length === 1 ? '' : 's');
-        list.innerHTML = groupByTag(matches).map(([tag, endpoints]) =>
-          '<li><h2>' + escapeHtml(tag) + '</h2><ul>' + endpoints.map((endpoint) =>
-            '<li><strong>' + escapeHtml(endpoint.method) + '</strong><span>' + escapeHtml(endpoint.path) + '</span>' +
-            (endpoint.summary ? '<p class="muted">' + escapeHtml(endpoint.summary) + '</p>' : '') +
-            (endpoint.deprecated ? '<p>Deprecated</p>' : '') +
-            '</li>'
-          ).join('') + '</ul></li>'
-        ).join('');
-      }
-
-      fetch(window.__BETTER_OPENAPI_VIEWER_CONFIG__.jsonPath)
-        .then((response) => {
-          if (!response.ok) throw new Error('OpenAPI document request failed with HTTP ' + response.status);
-          return response.json();
-        })
-        .then((openapi) => {
-          window.openapiDocument = openapi;
-          openapi.info && (window.document.querySelector('#title').textContent = openapi.info.title || 'OpenAPI');
-          openapi.info && (window.document.querySelector('#description').textContent = openapi.info.description || '');
-          state.endpoints = getOperationsFromDocument(openapi);
-          status.textContent = '';
-          render();
-        })
-        .catch((error) => {
-          status.textContent = error instanceof Error ? error.message : 'Unable to load OpenAPI document.';
-        });
-
-      search.addEventListener('input', render);
-
-      function getOperationsFromDocument(openapi) {
-        return Object.entries(openapi.paths || {}).flatMap(([path, pathItem]) =>
-          httpMethods.flatMap((method) => {
-            const operation = pathItem && pathItem[method];
-            if (!operation) return [];
-
-            return [{
-              method: method.toUpperCase(),
-              path,
-              summary: operation.summary || '',
-              deprecated: Boolean(operation.deprecated),
-              tags: operation.tags && operation.tags.length ? operation.tags : ['default'],
-              searchText: [
-                method,
-                path,
-                ...(operation.tags || []),
-                operation.summary,
-                operation.description,
-                operation.operationId,
-                ...Object.keys(operation.responses || {})
-              ].filter(Boolean).join(' ').toLowerCase()
-            }];
-          })
-        );
-      }
-
-      function groupByTag(endpoints) {
-        const groups = new Map();
-        endpoints.forEach((endpoint) => {
-          endpoint.tags.forEach((tag) => groups.set(tag, [...(groups.get(tag) || []), endpoint]));
-        });
-        return Array.from(groups.entries());
-      }
-
-      function escapeHtml(value) {
-        return String(value)
-          .replaceAll('&', '&amp;')
-          .replaceAll('<', '&lt;')
-          .replaceAll('>', '&gt;')
-          .replaceAll('"', '&quot;')
-          .replaceAll("'", '&#39;');
-      }
     </script>
+    <script src="${escapeAttribute(bundledViewerAssetPath)}"></script>
     ${customJs ? `<script>${customJs.replace(/<\/script/gi, '<\\/script')}</script>` : ''}
     ${jsLinks}
   </body>
@@ -396,6 +320,12 @@ function sendJson(response: JsonResponse, value: OpenAPIObject) {
 function sendHtml(response: HtmlResponse, value: string) {
   response.type?.('text/html');
   response.header?.('content-type', 'text/html');
+  response.send(value);
+}
+
+function sendJavaScript(response: HtmlResponse, value: string) {
+  response.type?.('application/javascript');
+  response.header?.('content-type', 'application/javascript');
   response.send(value);
 }
 
