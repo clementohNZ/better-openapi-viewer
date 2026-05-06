@@ -108,6 +108,7 @@ function renderViewerHtml({
       <p id="description" class="muted"></p>
       <input id="search" type="search" placeholder="Search endpoints" autocomplete="off" />
       <p id="count" class="muted"></p>
+      <p id="status" class="muted" role="status">Loading OpenAPI document...</p>
       <ul id="endpoints"></ul>
     </main>
     <script>
@@ -117,26 +118,39 @@ function renderViewerHtml({
       const list = document.querySelector('#endpoints');
       const search = document.querySelector('#search');
       const count = document.querySelector('#count');
+      const status = document.querySelector('#status');
 
       function render() {
         const query = search.value.trim().toLowerCase();
         const matches = state.endpoints.filter((endpoint) =>
-          endpoint.path.toLowerCase().includes(query) || endpoint.method.toLowerCase().includes(query)
+          endpoint.searchText.includes(query)
         );
         count.textContent = matches.length + ' endpoint' + (matches.length === 1 ? '' : 's');
-        list.innerHTML = matches.map((endpoint) =>
-          '<li><strong>' + endpoint.method + '</strong><span>' + endpoint.path + '</span></li>'
+        list.innerHTML = groupByTag(matches).map(([tag, endpoints]) =>
+          '<li><h2>' + escapeHtml(tag) + '</h2><ul>' + endpoints.map((endpoint) =>
+            '<li><strong>' + escapeHtml(endpoint.method) + '</strong><span>' + escapeHtml(endpoint.path) + '</span>' +
+            (endpoint.summary ? '<p class="muted">' + escapeHtml(endpoint.summary) + '</p>' : '') +
+            (endpoint.deprecated ? '<p>Deprecated</p>' : '') +
+            '</li>'
+          ).join('') + '</ul></li>'
         ).join('');
       }
 
       fetch(window.__BETTER_OPENAPI_VIEWER_CONFIG__.jsonPath)
-        .then((response) => response.json())
+        .then((response) => {
+          if (!response.ok) throw new Error('OpenAPI document request failed with HTTP ' + response.status);
+          return response.json();
+        })
         .then((openapi) => {
           window.openapiDocument = openapi;
           openapi.info && (window.document.querySelector('#title').textContent = openapi.info.title || 'OpenAPI');
           openapi.info && (window.document.querySelector('#description').textContent = openapi.info.description || '');
           state.endpoints = getOperationsFromDocument(openapi);
+          status.textContent = '';
           render();
+        })
+        .catch((error) => {
+          status.textContent = error instanceof Error ? error.message : 'Unable to load OpenAPI document.';
         });
 
       search.addEventListener('input', render);
@@ -151,6 +165,8 @@ function renderViewerHtml({
               method: method.toUpperCase(),
               path,
               summary: operation.summary || '',
+              deprecated: Boolean(operation.deprecated),
+              tags: operation.tags && operation.tags.length ? operation.tags : ['default'],
               searchText: [
                 method,
                 path,
@@ -163,6 +179,23 @@ function renderViewerHtml({
             }];
           })
         );
+      }
+
+      function groupByTag(endpoints) {
+        const groups = new Map();
+        endpoints.forEach((endpoint) => {
+          endpoint.tags.forEach((tag) => groups.set(tag, [...(groups.get(tag) || []), endpoint]));
+        });
+        return Array.from(groups.entries());
+      }
+
+      function escapeHtml(value) {
+        return String(value)
+          .replaceAll('&', '&amp;')
+          .replaceAll('<', '&lt;')
+          .replaceAll('>', '&gt;')
+          .replaceAll('"', '&quot;')
+          .replaceAll("'", '&#39;');
       }
     </script>
   </body>
