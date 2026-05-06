@@ -5,9 +5,13 @@ export type BetterOpenApiViewerOptions = {
   path?: string;
   jsonPath?: string;
   document?: OpenAPIObject;
-  documentFactory?: () => OpenAPIObject;
+  documentFactory?: () => OpenAPIObject | Promise<OpenAPIObject>;
+  cacheDocument?: boolean;
   title?: string;
   customCss?: string;
+  customCssUrl?: string | string[];
+  customJs?: string;
+  customJsUrl?: string | string[];
   faviconUrl?: string;
   defaultExpansion?: 'none' | 'list' | 'full';
   deepLinking?: boolean;
@@ -20,26 +24,48 @@ export type BetterOpenApiViewerOptions = {
 export function setupBetterOpenApiViewer(app: INestApplication, options: BetterOpenApiViewerOptions = {}) {
   const uiPath = normalizeRoute(options.path ?? 'docs');
   const jsonPath = normalizeRoute(options.jsonPath ?? `${uiPath}/openapi.json`);
-  const document = options.document ?? options.documentFactory?.();
+  let cachedDocument = options.document;
 
-  if (!document) {
+  if (!cachedDocument && !options.documentFactory) {
     throw new Error('setupBetterOpenApiViewer requires an OpenAPI document or documentFactory.');
   }
+
+  const getDocument = async () => {
+    if (cachedDocument) {
+      return cachedDocument;
+    }
+
+    const document = await options.documentFactory?.();
+
+    if (!document) {
+      throw new Error('setupBetterOpenApiViewer documentFactory did not return an OpenAPI document.');
+    }
+
+    if (options.cacheDocument ?? true) {
+      cachedDocument = document;
+    }
+
+    return document;
+  };
 
   const httpAdapter = app.getHttpAdapter();
   const instance = httpAdapter.getInstance();
 
-  instance.get(`/${jsonPath}`, (_request: unknown, response: { json: (value: OpenAPIObject) => void }) => {
-    response.json(document);
+  instance.get(`/${jsonPath}`, async (_request: unknown, response: JsonResponse) => {
+    sendJson(response, await getDocument());
   });
 
-  instance.get(`/${uiPath}`, (_request: unknown, response: { type: (value: string) => void; send: (value: string) => void }) => {
-    response.type('text/html');
-    response.send(
+  instance.get(`/${uiPath}`, async (_request: unknown, response: HtmlResponse) => {
+    const document = await getDocument();
+    sendHtml(
+      response,
       renderViewerHtml({
         jsonPath: `/${jsonPath}`,
         title: options.title ?? document.info?.title ?? 'Better OpenAPI Viewer',
         customCss: options.customCss,
+        customCssUrl: options.customCssUrl,
+        customJs: options.customJs,
+        customJsUrl: options.customJsUrl,
         faviconUrl: options.faviconUrl,
         config: {
           defaultExpansion: options.defaultExpansion ?? 'list',
@@ -54,6 +80,17 @@ export function setupBetterOpenApiViewer(app: INestApplication, options: BetterO
   });
 }
 
+type JsonResponse = {
+  json?: (value: OpenAPIObject) => void;
+  send?: (value: OpenAPIObject) => void;
+};
+
+type HtmlResponse = {
+  type?: (value: string) => HtmlResponse;
+  header?: (name: string, value: string) => HtmlResponse;
+  send: (value: string) => void;
+};
+
 function normalizeRoute(route: string) {
   return route.replace(/^\/+|\/+$/g, '');
 }
@@ -62,12 +99,18 @@ function renderViewerHtml({
   jsonPath,
   title,
   customCss,
+  customCssUrl,
+  customJs,
+  customJsUrl,
   faviconUrl,
   config,
 }: {
   jsonPath: string;
   title: string;
   customCss?: string;
+  customCssUrl?: string | string[];
+  customJs?: string;
+  customJsUrl?: string | string[];
   faviconUrl?: string;
   config: {
     defaultExpansion: 'none' | 'list' | 'full';
@@ -80,6 +123,12 @@ function renderViewerHtml({
 }) {
   const serializedConfig = JSON.stringify({ jsonPath, ...config }).replace(/</g, '\\u003c');
   const escapedTitle = escapeHtml(title);
+  const cssLinks = asArray(customCssUrl)
+    .map((url) => `<link rel="stylesheet" href="${escapeAttribute(url)}" />`)
+    .join('\n    ');
+  const jsLinks = asArray(customJsUrl)
+    .map((url) => `<script src="${escapeAttribute(url)}"></script>`)
+    .join('\n    ');
 
   return `<!doctype html>
 <html lang="en">
@@ -88,6 +137,7 @@ function renderViewerHtml({
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>${escapedTitle}</title>
     ${faviconUrl ? `<link rel="icon" href="${escapeAttribute(faviconUrl)}" />` : ''}
+    ${cssLinks}
     <style>
       :root { color-scheme: light dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
       body { margin: 0; background: #f7f8fb; color: #151923; }
@@ -198,8 +248,33 @@ function renderViewerHtml({
           .replaceAll("'", '&#39;');
       }
     </script>
+    ${customJs ? `<script>${customJs.replace(/<\/script/gi, '<\\/script')}</script>` : ''}
+    ${jsLinks}
   </body>
 </html>`;
+}
+
+function sendJson(response: JsonResponse, value: OpenAPIObject) {
+  if (response.json) {
+    response.json(value);
+    return;
+  }
+
+  response.send?.(value);
+}
+
+function sendHtml(response: HtmlResponse, value: string) {
+  response.type?.('text/html');
+  response.header?.('content-type', 'text/html');
+  response.send(value);
+}
+
+function asArray<T>(value: T | T[] | undefined) {
+  if (!value) {
+    return [];
+  }
+
+  return Array.isArray(value) ? value : [value];
 }
 
 function escapeHtml(value: string) {
