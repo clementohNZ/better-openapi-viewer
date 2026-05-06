@@ -1,8 +1,8 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   buildTryItOutRequest,
   filterOperations,
-  generateCurlSnippet,
+  generateRequestSnippet,
   getMediaTypeExample,
   getOperations,
   getSecuritySchemes,
@@ -34,6 +34,7 @@ import {
   type ServerObject,
   type TryItOutAuthCredentials,
   type TryItOutRequest,
+  type TryItOutRequestSnippetLanguage,
   type ViewerConfig,
 } from '@better-openapi-viewer/core';
 
@@ -51,6 +52,8 @@ export function BetterOpenApiViewer({ document, config, persistAuthorization }: 
   const [authFilter, setAuthFilter] = useState<NonNullable<OperationFilter['auth']>>('any');
   const [deprecatedFilter, setDeprecatedFilter] = useState('any');
   const [selectedContentTypes, setSelectedContentTypes] = useState<string[]>([]);
+  const [tryItOutEnabled, setTryItOutEnabled] = useState(true);
+  const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const operations = useMemo(() => sortOperations(getOperations(document), viewerConfig.operationsSorter), [document, viewerConfig.operationsSorter]);
   const [expandedOperations, setExpandedOperations] = useState<Set<string>>(() =>
     viewerConfig.defaultExpansion === 'full' ? new Set(operations.map((operation) => operation.id)) : new Set(),
@@ -139,11 +142,22 @@ export function BetterOpenApiViewer({ document, config, persistAuthorization }: 
   };
 
   return (
-    <main>
+    <main data-theme={theme}>
       <header>
         {document.info?.version ? <p>{document.info.version}</p> : null}
         <h1>{document.info?.title ?? 'OpenAPI'}</h1>
         {document.info?.description ? <p>{document.info.description}</p> : null}
+        <fieldset aria-label="Viewer theme">
+          <legend>Theme</legend>
+          <label>
+            <input type="radio" name="viewer-theme" checked={theme === 'light'} onChange={() => setTheme('light')} />
+            Light theme
+          </label>
+          <label>
+            <input type="radio" name="viewer-theme" checked={theme === 'dark'} onChange={() => setTheme('dark')} />
+            Dark theme
+          </label>
+        </fieldset>
       </header>
 
       <AuthorizePanel
@@ -280,6 +294,10 @@ export function BetterOpenApiViewer({ document, config, persistAuthorization }: 
           <button type="button" onClick={collapseAll}>
             Collapse all
           </button>
+          <label>
+            <input type="checkbox" checked={tryItOutEnabled} onChange={(event) => setTryItOutEnabled(event.currentTarget.checked)} />
+            Enable Try It Out
+          </label>
         </div>
         {groupedOperations.map(({ name, description, externalDocs, operations: tagOperations }) => (
           <section key={name} aria-labelledby={`tag-${toDomId(name)}`}>
@@ -322,6 +340,7 @@ export function BetterOpenApiViewer({ document, config, persistAuthorization }: 
                             <TryItOut
                               authCredentials={authCredentials}
                               displayRequestDuration={viewerConfig.displayRequestDuration}
+                              globallyEnabled={tryItOutEnabled}
                               operation={operation}
                               document={document}
                             />
@@ -994,24 +1013,30 @@ type TryItOutState = {
   parameters: Record<string, string>;
   bodyText: string;
   bodyFormat: 'json' | 'text';
+  snippetLanguage: SnippetLanguage;
   response?: TryItOutResponse;
   error?: string;
   isSending: boolean;
 };
 
+type SnippetLanguage = TryItOutRequestSnippetLanguage;
+
 function TryItOut({
   authCredentials,
   displayRequestDuration,
+  globallyEnabled,
   operation,
   document,
 }: {
   authCredentials: TryItOutAuthCredentials;
   displayRequestDuration: boolean;
+  globallyEnabled: boolean;
   operation: NormalizedOperation;
   document: OpenAPIObject;
 }) {
   const initialState = useMemo(() => createTryItOutState(operation), [operation]);
   const [state, setState] = useState<TryItOutState>(initialState);
+  const abortControllerRef = useRef<AbortController | undefined>(undefined);
   const parameterFields = useMemo(() => operation.parameters.filter((parameter): parameter is ParameterObject => !isReferenceObject(parameter)), [operation.parameters]);
   const request = useMemo(
     () => buildTryItOutRequestForState({ authCredentials, document, operation, state }),
@@ -1023,6 +1048,9 @@ function TryItOut({
   };
 
   const sendRequest = async () => {
+    abortControllerRef.current?.abort();
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
     setState((current) => ({ ...current, error: undefined, isSending: true, response: undefined }));
     const startedAt = performance.now();
 
@@ -1031,10 +1059,16 @@ function TryItOut({
         method: request.method,
         headers: request.headers,
         body: request.body,
+        signal: abortController.signal,
       });
       const body = await response.text();
       const durationMs = Math.round(performance.now() - startedAt);
 
+      if (abortControllerRef.current !== abortController) {
+        return;
+      }
+
+      abortControllerRef.current = undefined;
       setState((current) => ({
         ...current,
         isSending: false,
@@ -1047,26 +1081,45 @@ function TryItOut({
         },
       }));
     } catch (error) {
+      if (abortControllerRef.current !== abortController) {
+        return;
+      }
+
+      abortControllerRef.current = undefined;
       setState((current) => ({
         ...current,
         isSending: false,
-        error: error instanceof Error ? error.message : 'Request failed.',
+        error: error instanceof DOMException && error.name === 'AbortError' ? 'Request canceled.' : error instanceof Error ? error.message : 'Request failed.',
       }));
     }
   };
 
+  const cancelRequest = () => {
+    abortControllerRef.current?.abort();
+  };
+
+  useEffect(() => {
+    if (!globallyEnabled) {
+      cancelRequest();
+    }
+  }, [globallyEnabled]);
+
   return (
     <section aria-labelledby={`${toDomId(operation.id)}-try-it-out`}>
       <h4 id={`${toDomId(operation.id)}-try-it-out`}>Try It Out</h4>
-      <label>
-        <input
-          type="checkbox"
-          checked={state.enabled}
-          onChange={(event) => setState((current) => ({ ...current, enabled: event.currentTarget.checked }))}
-        />
-        Enable request editing
-      </label>
-      {state.enabled ? (
+      {globallyEnabled ? (
+        <label>
+          <input
+            type="checkbox"
+            checked={state.enabled}
+            onChange={(event) => setState((current) => ({ ...current, enabled: event.currentTarget.checked }))}
+          />
+          Enable request editing
+        </label>
+      ) : (
+        <p>Try It Out is disabled.</p>
+      )}
+      {globallyEnabled && state.enabled ? (
         <div>
           <fieldset>
             <legend>Request setup</legend>
@@ -1138,10 +1191,17 @@ function TryItOut({
             </label>
           ) : null}
 
-          <GeneratedRequest request={request} />
+          <GeneratedRequest
+            request={request}
+            snippetLanguage={state.snippetLanguage}
+            onSnippetLanguageChange={(snippetLanguage) => setState((current) => ({ ...current, snippetLanguage }))}
+          />
           <div>
             <button type="button" onClick={sendRequest} disabled={state.isSending}>
               {state.isSending ? 'Sending...' : 'Send request'}
+            </button>
+            <button type="button" onClick={cancelRequest} disabled={!state.isSending}>
+              Cancel request
             </button>
             <button type="button" onClick={() => setState({ ...createTryItOutState(operation), enabled: true })}>
               Reset inputs
@@ -1154,7 +1214,17 @@ function TryItOut({
   );
 }
 
-function GeneratedRequest({ request }: { request: TryItOutRequest }) {
+function GeneratedRequest({
+  onSnippetLanguageChange,
+  request,
+  snippetLanguage,
+}: {
+  onSnippetLanguageChange: (language: SnippetLanguage) => void;
+  request: TryItOutRequest;
+  snippetLanguage: SnippetLanguage;
+}) {
+  const snippet = generateRequestSnippet(request, snippetLanguage);
+
   return (
     <section>
       <h5>Generated request</h5>
@@ -1163,6 +1233,7 @@ function GeneratedRequest({ request }: { request: TryItOutRequest }) {
           <dt>URL</dt>
           <dd>
             <code>{request.url}</code>
+            <CopyButton label="Copy generated URL" value={request.url} />
           </dd>
         </div>
         <div>
@@ -1173,12 +1244,31 @@ function GeneratedRequest({ request }: { request: TryItOutRequest }) {
         </div>
         <div>
           <dt>Body</dt>
-          <dd>{request.body === undefined ? 'No body.' : <pre>{request.body}</pre>}</dd>
+          <dd>
+            {request.body === undefined ? (
+              'No body.'
+            ) : (
+              <>
+                <pre>{request.body}</pre>
+                <CopyButton label="Copy generated request body" value={request.body} />
+              </>
+            )}
+          </dd>
         </div>
         <div>
-          <dt>curl</dt>
+          <dt>Snippet</dt>
           <dd>
-            <pre>{generateCurlSnippet(request)}</pre>
+            <label>
+              Snippet language
+              <select value={snippetLanguage} onChange={(event) => onSnippetLanguageChange(event.currentTarget.value as SnippetLanguage)}>
+                <option value="curl">curl</option>
+                <option value="fetch">JavaScript fetch</option>
+                <option value="httpie">HTTPie</option>
+                <option value="python">Python</option>
+              </select>
+            </label>
+            <pre>{snippet}</pre>
+            <CopyButton label={`Copy generated ${snippetLanguage} snippet`} value={snippet} />
           </dd>
         </div>
       </dl>
@@ -1195,9 +1285,13 @@ function TryItOutResult({ displayRequestDuration, state }: { displayRequestDurat
     return null;
   }
 
+  const responseText = JSON.stringify(state.response, null, 2);
+
   return (
     <section aria-live="polite">
-      <h5>Response</h5>
+      <h5>
+        Response <CopyButton label="Copy response" value={responseText} />
+      </h5>
       <dl>
         <div>
           <dt>Status</dt>
@@ -1221,10 +1315,31 @@ function TryItOutResult({ displayRequestDuration, state }: { displayRequestDurat
           <dt>Body</dt>
           <dd>
             <pre>{state.response.body}</pre>
+            <CopyButton label="Copy response body" value={state.response.body} />
           </dd>
         </div>
       </dl>
     </section>
+  );
+}
+
+function CopyButton({ label, value }: { label: string; value: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const copyValue = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
+    }
+  };
+
+  return (
+    <button type="button" onClick={copyValue} aria-label={label}>
+      {copied ? 'Copied' : 'Copy'}
+    </button>
   );
 }
 
@@ -1372,6 +1487,7 @@ function createTryItOutState(operation: NormalizedOperation): TryItOutState {
     ),
     bodyText: formatInitialBody(operation, contentType),
     bodyFormat: isJsonContentType(contentType) ? 'json' : 'text',
+    snippetLanguage: 'curl',
     isSending: false,
   };
 }
