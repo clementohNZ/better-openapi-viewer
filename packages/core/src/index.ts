@@ -32,7 +32,7 @@ export type ComponentsObject = {
   requestBodies?: Record<string, unknown>;
   responses?: Record<string, unknown>;
   examples?: Record<string, unknown>;
-  securitySchemes?: Record<string, unknown>;
+  securitySchemes?: Record<string, SecuritySchemeObject | ReferenceObject | unknown>;
 };
 
 export type TagObject = {
@@ -83,6 +83,9 @@ export type ParameterObject = {
   description?: string;
   required?: boolean;
   deprecated?: boolean;
+  style?: ParameterStyle;
+  explode?: boolean;
+  allowReserved?: boolean;
   schema?: SchemaObject | ReferenceObject | unknown;
   content?: Record<string, MediaTypeObject>;
   example?: unknown;
@@ -219,6 +222,70 @@ export type ResolvedReference<T = unknown> = {
 export type SchemaExampleOptions = {
   requiredOnly?: boolean;
   maxDepth?: number;
+};
+
+export type KnownParameterStyle = 'form' | 'simple' | 'spaceDelimited' | 'pipeDelimited' | 'deepObject';
+
+export type ParameterStyle = KnownParameterStyle | string;
+
+export type SerializablePrimitive = string | number | boolean | null;
+
+export type SerializableParameterValue =
+  | SerializablePrimitive
+  | SerializablePrimitive[]
+  | Record<string, SerializablePrimitive | SerializablePrimitive[] | Record<string, SerializablePrimitive>>;
+
+export type SerializedParameterPart = {
+  name: string;
+  value: string;
+};
+
+export type SecuritySchemeObject = {
+  type: 'apiKey' | 'http' | 'oauth2' | 'openIdConnect' | string;
+  description?: string;
+  name?: string;
+  in?: 'query' | 'header' | 'cookie' | string;
+  scheme?: string;
+  bearerFormat?: string;
+  flows?: unknown;
+  openIdConnectUrl?: string;
+};
+
+export type BasicAuthCredentials = {
+  username: string;
+  password: string;
+};
+
+export type SecurityCredential =
+  | string
+  | BasicAuthCredentials
+  | {
+      value: string;
+    };
+
+export type TryItOutAuthCredentials = Record<string, SecurityCredential | undefined>;
+
+export type TryItOutRequestInput = {
+  document?: OpenAPIObject;
+  operation: Pick<NormalizedOperation, 'method' | 'path' | 'parameters' | 'requestBody' | 'security' | 'servers'>;
+  serverUrl?: string;
+  server?: ServerObject;
+  serverVariables?: Record<string, string | number | boolean>;
+  parameters?: Record<string, SerializableParameterValue | undefined>;
+  headers?: Record<string, string | undefined>;
+  cookies?: Record<string, string | undefined>;
+  body?: unknown;
+  contentType?: string;
+  auth?: TryItOutAuthCredentials;
+  securitySchemes?: Record<string, SecuritySchemeObject | ReferenceObject | unknown>;
+};
+
+export type TryItOutRequest = {
+  method: Uppercase<HttpMethod>;
+  url: string;
+  headers: Record<string, string>;
+  cookies: Record<string, string>;
+  body?: string;
 };
 
 const HTTP_METHODS: HttpMethod[] = ['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace'];
@@ -491,6 +558,143 @@ export function getSchemaType(schema: SchemaObject | ReferenceObject | unknown):
   return undefined;
 }
 
+export function selectServerUrl(
+  servers: ServerObject[] = [],
+  options: { serverUrl?: string; index?: number; variables?: Record<string, string | number | boolean> } = {},
+): string {
+  const server = options.serverUrl
+    ? { url: options.serverUrl }
+    : (servers[options.index ?? 0] ?? servers[0] ?? { url: '/' });
+
+  return substituteServerVariables(server, options.variables);
+}
+
+export function substituteServerVariables(server: ServerObject, values: Record<string, string | number | boolean> = {}): string {
+  return server.url.replace(/\{([^}]+)\}/g, (_match, variableName: string) => {
+    const variable = server.variables?.[variableName];
+    const value = values[variableName] ?? variable?.default ?? '';
+    return encodeUriPathValue(String(value));
+  });
+}
+
+export function serializeParameter(parameter: ParameterObject, value: SerializableParameterValue | undefined): SerializedParameterPart[] {
+  if (value === undefined || value === null) {
+    return [];
+  }
+
+  const style = parameter.style ?? getDefaultParameterStyle(parameter.in);
+  const explode = parameter.explode ?? (style === 'form' || style === 'deepObject');
+  const name = parameter.name;
+
+  if (style === 'deepObject' && isObject(value)) {
+    return Object.entries(value).flatMap(([key, item]) => serializeDeepObjectPart(`${name}[${key}]`, item));
+  }
+
+  if (Array.isArray(value)) {
+    const separator = getParameterSeparator(style);
+    if (style === 'simple') {
+      return [{ name, value: value.map(stringifyParameterValue).join(separator) }];
+    }
+
+    return explode ? value.map((item) => ({ name, value: stringifyParameterValue(item) })) : [{ name, value: value.map(stringifyParameterValue).join(separator) }];
+  }
+
+  if (isObject(value)) {
+    const entries = Object.entries(value);
+
+    if (style === 'simple') {
+      return [
+        {
+          name,
+          value: entries
+            .flatMap(([key, item]) => (explode ? [`${key}=${stringifyParameterValue(item)}`] : [key, stringifyParameterValue(item)]))
+            .join(','),
+        },
+      ];
+    }
+
+    if (explode) {
+      return entries.map(([key, item]) => ({ name: key, value: stringifyParameterValue(item) }));
+    }
+
+    const separator = getParameterSeparator(style);
+    return [{ name, value: entries.flatMap(([key, item]) => [key, stringifyParameterValue(item)]).join(separator) }];
+  }
+
+  return [{ name, value: stringifyParameterValue(value) }];
+}
+
+export function buildTryItOutRequest(input: TryItOutRequestInput): TryItOutRequest {
+  const headers = normalizeHeaders(input.headers);
+  const cookies = normalizeCookies(input.cookies);
+  const securitySchemes = input.securitySchemes ?? getDocumentSecuritySchemes(input.document);
+  const selectedServerUrl = input.serverUrl ?? (input.server ? substituteServerVariables(input.server, input.serverVariables) : selectServerUrl(input.operation.servers, { variables: input.serverVariables }));
+  const baseUrl = trimTrailingSlash(selectedServerUrl);
+  let path = input.operation.path;
+  const queryParts: SerializedParameterPart[] = [];
+
+  for (const parameter of input.operation.parameters) {
+    if (isReferenceObject(parameter)) {
+      continue;
+    }
+
+    const value = input.parameters?.[parameter.name];
+    const parts = serializeParameter(parameter, value);
+
+    if (parameter.in === 'path') {
+      path = replacePathParameter(path, parameter.name, parts.map((part) => part.value).join(','));
+    } else if (parameter.in === 'query') {
+      queryParts.push(...parts);
+    } else if (parameter.in === 'header') {
+      for (const part of parts) {
+        headers[part.name] = part.value;
+      }
+    } else if (parameter.in === 'cookie') {
+      for (const part of parts) {
+        cookies[part.name] = part.value;
+      }
+    }
+  }
+
+  applyAuthCredentials({ headers, cookies, queryParts, securitySchemes, credentials: input.auth, requirements: input.operation.security });
+
+  const body = buildRequestBody(input.body, input.contentType);
+  if (body.contentType && !hasHeader(headers, 'content-type')) {
+    headers['Content-Type'] = body.contentType;
+  }
+
+  const url = appendQueryString(`${baseUrl}${path.startsWith('/') || !baseUrl ? path : `/${path}`}`, queryParts);
+
+  return {
+    method: input.operation.method.toUpperCase() as Uppercase<HttpMethod>,
+    url,
+    headers,
+    cookies,
+    body: body.value,
+  };
+}
+
+export function generateCurlSnippet(request: TryItOutRequest): string {
+  const args = ['curl', '-X', request.method, shellQuote(request.url)];
+  const cookieHeader = Object.entries(request.cookies)
+    .map(([name, value]) => `${name}=${value}`)
+    .join('; ');
+
+  for (const [name, value] of Object.entries(request.headers)) {
+    args.push('-H', shellQuote(`${name}: ${value}`));
+  }
+
+  if (cookieHeader) {
+    args.push('-H', shellQuote(`Cookie: ${cookieHeader}`));
+  }
+
+  if (request.body !== undefined) {
+    args.push('--data', shellQuote(request.body));
+  }
+
+  return args.join(' \\\n  ');
+}
+
 function mergeParameters(pathParameters: Array<ParameterObject | ReferenceObject> = [], operationParameters: Array<ParameterObject | ReferenceObject> = []) {
   const merged = new Map<string, ParameterObject | ReferenceObject>();
 
@@ -499,6 +703,213 @@ function mergeParameters(pathParameters: Array<ParameterObject | ReferenceObject
   }
 
   return [...merged.values()];
+}
+
+function getDefaultParameterStyle(location: ParameterObject['in']): ParameterStyle {
+  return location === 'path' || location === 'header' ? 'simple' : 'form';
+}
+
+function getParameterSeparator(style: ParameterStyle) {
+  if (style === 'spaceDelimited') {
+    return ' ';
+  }
+
+  if (style === 'pipeDelimited') {
+    return '|';
+  }
+
+  return ',';
+}
+
+function serializeDeepObjectPart(name: string, value: unknown): SerializedParameterPart[] {
+  if (value === undefined || value === null) {
+    return [];
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => ({ name, value: stringifyParameterValue(item) }));
+  }
+
+  if (isObject(value)) {
+    return Object.entries(value).flatMap(([key, item]) => serializeDeepObjectPart(`${name}[${key}]`, item));
+  }
+
+  return [{ name, value: stringifyParameterValue(value) }];
+}
+
+function stringifyParameterValue(value: unknown): string {
+  if (value === null || value === undefined) {
+    return '';
+  }
+
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+
+  return JSON.stringify(value);
+}
+
+function replacePathParameter(path: string, name: string, value: string) {
+  const encodedValue = encodeUriPathValue(value);
+  return path.replace(new RegExp(`\\{${escapeRegExp(name)}\\}`, 'g'), encodedValue);
+}
+
+function appendQueryString(url: string, parts: SerializedParameterPart[]) {
+  const query = parts
+    .map((part) => `${encodeURIComponent(part.name)}=${encodeURIComponent(part.value)}`)
+    .join('&');
+
+  if (!query) {
+    return url;
+  }
+
+  return `${url}${url.includes('?') ? '&' : '?'}${query}`;
+}
+
+function applyAuthCredentials({
+  headers,
+  cookies,
+  queryParts,
+  securitySchemes,
+  credentials = {},
+  requirements,
+}: {
+  headers: Record<string, string>;
+  cookies: Record<string, string>;
+  queryParts: SerializedParameterPart[];
+  securitySchemes: Record<string, SecuritySchemeObject | ReferenceObject | unknown>;
+  credentials?: TryItOutAuthCredentials;
+  requirements: SecurityRequirementObject[];
+}) {
+  const requiredSchemeNames = new Set(requirements.flatMap((requirement) => Object.keys(requirement)));
+  const schemeNames = requiredSchemeNames.size ? [...requiredSchemeNames] : Object.keys(credentials);
+
+  for (const schemeName of schemeNames) {
+    const credential = credentials[schemeName];
+    const scheme = securitySchemes[schemeName];
+
+    if (!credential || !isSecuritySchemeObject(scheme)) {
+      continue;
+    }
+
+    if (scheme.type === 'http' && scheme.scheme?.toLowerCase() === 'basic' && isBasicAuthCredentials(credential)) {
+      headers.Authorization = `Basic ${encodeBase64(`${credential.username}:${credential.password}`)}`;
+      continue;
+    }
+
+    if (scheme.type === 'http' && scheme.scheme?.toLowerCase() === 'bearer') {
+      headers.Authorization = `Bearer ${getCredentialValue(credential)}`;
+      continue;
+    }
+
+    if (scheme.type === 'apiKey' && scheme.name) {
+      const value = getCredentialValue(credential);
+      if (scheme.in === 'header') {
+        headers[scheme.name] = value;
+      } else if (scheme.in === 'query') {
+        queryParts.push({ name: scheme.name, value });
+      } else if (scheme.in === 'cookie') {
+        cookies[scheme.name] = value;
+      }
+    }
+  }
+}
+
+function buildRequestBody(body: unknown, contentType?: string): { value?: string; contentType?: string } {
+  if (body === undefined) {
+    return {};
+  }
+
+  if (typeof body === 'string') {
+    return { value: body, contentType };
+  }
+
+  if (body instanceof URLSearchParams) {
+    return { value: body.toString(), contentType: contentType ?? 'application/x-www-form-urlencoded' };
+  }
+
+  return { value: JSON.stringify(body), contentType: contentType ?? 'application/json' };
+}
+
+function normalizeHeaders(headers: Record<string, string | undefined> = {}) {
+  return Object.fromEntries(Object.entries(headers).filter((entry): entry is [string, string] => entry[1] !== undefined));
+}
+
+function normalizeCookies(cookies: Record<string, string | undefined> = {}) {
+  return Object.fromEntries(Object.entries(cookies).filter((entry): entry is [string, string] => entry[1] !== undefined));
+}
+
+function hasHeader(headers: Record<string, string>, name: string) {
+  const normalizedName = name.toLowerCase();
+  return Object.keys(headers).some((headerName) => headerName.toLowerCase() === normalizedName);
+}
+
+function getCredentialValue(credential: SecurityCredential) {
+  if (typeof credential === 'string') {
+    return credential;
+  }
+
+  if (isBasicAuthCredentials(credential)) {
+    return `${credential.username}:${credential.password}`;
+  }
+
+  return credential.value;
+}
+
+function isBasicAuthCredentials(value: SecurityCredential): value is BasicAuthCredentials {
+  const candidate = value as Partial<BasicAuthCredentials>;
+  return isObject(value) && typeof candidate.username === 'string' && typeof candidate.password === 'string';
+}
+
+function isSecuritySchemeObject(value: unknown): value is SecuritySchemeObject {
+  return isObject(value) && typeof value.type === 'string' && !isReferenceObject(value);
+}
+
+function getDocumentSecuritySchemes(document: OpenAPIObject | undefined): Record<string, SecuritySchemeObject | ReferenceObject | unknown> {
+  const securitySchemes = isObject(document?.components) ? document.components.securitySchemes : undefined;
+  return isObject(securitySchemes) ? securitySchemes : {};
+}
+
+function encodeBase64(value: string) {
+  if (typeof btoa === 'function') {
+    return btoa(value);
+  }
+
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+  let output = '';
+
+  for (let index = 0; index < value.length; index += 3) {
+    const first = value.charCodeAt(index);
+    const second = value.charCodeAt(index + 1);
+    const third = value.charCodeAt(index + 2);
+    const triplet = (first << 16) | ((Number.isNaN(second) ? 0 : second) << 8) | (Number.isNaN(third) ? 0 : third);
+
+    output += alphabet[(triplet >> 18) & 63];
+    output += alphabet[(triplet >> 12) & 63];
+    output += Number.isNaN(second) ? '=' : alphabet[(triplet >> 6) & 63];
+    output += Number.isNaN(third) ? '=' : alphabet[triplet & 63];
+  }
+
+  return output;
+}
+
+function encodeUriPathValue(value: string) {
+  return value
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
+}
+
+function trimTrailingSlash(value: string) {
+  return value.length > 1 ? value.replace(/\/+$/, '') : value;
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function shellQuote(value: string) {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 function getParameterKey(parameter: ParameterObject | ReferenceObject) {
