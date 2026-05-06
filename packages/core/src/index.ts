@@ -276,12 +276,22 @@ export type ResolvedReference<T = unknown> = {
   ref: string;
 };
 
+export type ExternalReferenceLoader = (ref: string) => unknown | Promise<unknown>;
+
+export type ResolveReferenceOptions = {
+  loader?: ExternalReferenceLoader;
+};
+
+export type ResolvedExternalReference<T = unknown> = ResolvedReference<T> & {
+  external: true;
+};
+
 export type SchemaExampleOptions = {
   requiredOnly?: boolean;
   maxDepth?: number;
 };
 
-export type KnownParameterStyle = 'form' | 'simple' | 'spaceDelimited' | 'pipeDelimited' | 'deepObject';
+export type KnownParameterStyle = 'form' | 'simple' | 'spaceDelimited' | 'pipeDelimited' | 'deepObject' | 'matrix' | 'label';
 
 export type ParameterStyle = KnownParameterStyle | string;
 
@@ -322,6 +332,32 @@ export type SecurityCredential =
 
 export type TryItOutAuthCredentials = Record<string, SecurityCredential | undefined>;
 
+export type TryItOutResponse = {
+  status: number;
+  statusText?: string;
+  headers: Record<string, string>;
+  body?: unknown;
+};
+
+export type TryItOutRequestInterceptorContext = {
+  input: TryItOutRequestInput;
+};
+
+export type TryItOutResponseInterceptorContext = TryItOutRequestInterceptorContext & {
+  request: TryItOutRequest;
+};
+
+export type TryItOutRequestInterceptor = (request: TryItOutRequest, context: TryItOutRequestInterceptorContext) => TryItOutRequest;
+
+export type TryItOutResponseInterceptor = (response: TryItOutResponse, context: TryItOutResponseInterceptorContext) => TryItOutResponse;
+
+export type TryItOutInterceptors = {
+  request?: TryItOutRequestInterceptor;
+  response?: TryItOutResponseInterceptor;
+};
+
+export type TryItOutRequestSnippetLanguage = 'curl' | 'fetch' | 'httpie' | 'python';
+
 export type TryItOutRequestInput = {
   document?: OpenAPIObject;
   operation: Pick<NormalizedOperation, 'method' | 'path' | 'parameters' | 'requestBody' | 'security' | 'servers'>;
@@ -335,6 +371,7 @@ export type TryItOutRequestInput = {
   contentType?: string;
   auth?: TryItOutAuthCredentials;
   securitySchemes?: Record<string, SecuritySchemeObject | ReferenceObject | unknown>;
+  interceptors?: TryItOutInterceptors;
 };
 
 export type TryItOutRequest = {
@@ -639,6 +676,24 @@ export function resolveInternalReference<T = unknown>(document: unknown, ref: st
   return value === undefined ? undefined : { value: value as T, ref };
 }
 
+export async function resolveReference<T = unknown>(
+  document: unknown,
+  ref: string,
+  options: ResolveReferenceOptions = {},
+): Promise<ResolvedReference<T> | ResolvedExternalReference<T> | undefined> {
+  const internal = resolveInternalReference<T>(document, ref);
+  if (internal) {
+    return internal;
+  }
+
+  if (!options.loader) {
+    return undefined;
+  }
+
+  const value = await options.loader(ref);
+  return value === undefined ? undefined : { value: value as T, ref, external: true };
+}
+
 export function resolveInternalReferences<T>(value: T, options: { preserveRefs?: boolean; maxDepth?: number } = {}): T {
   return resolveValue(value, value, new Set(), 0, options.maxDepth ?? 80, Boolean(options.preserveRefs)) as T;
 }
@@ -850,6 +905,14 @@ export function serializeParameter(parameter: ParameterObject, value: Serializab
     return Object.entries(value).flatMap(([key, item]) => serializeDeepObjectPart(`${name}[${key}]`, item));
   }
 
+  if (style === 'matrix') {
+    return [serializeMatrixParameter(name, value, explode)];
+  }
+
+  if (style === 'label') {
+    return [serializeLabelParameter(name, value, explode)];
+  }
+
   if (Array.isArray(value)) {
     const separator = getParameterSeparator(style);
     if (style === 'simple') {
@@ -925,13 +988,15 @@ export function buildTryItOutRequest(input: TryItOutRequestInput): TryItOutReque
 
   const url = appendQueryString(`${baseUrl}${path.startsWith('/') || !baseUrl ? path : `/${path}`}`, queryParts);
 
-  return {
+  const request = {
     method: input.operation.method.toUpperCase() as Uppercase<HttpMethod>,
     url,
     headers,
     cookies,
     body: body.value,
   };
+
+  return input.interceptors?.request ? input.interceptors.request(request, { input }) : request;
 }
 
 export function generateCurlSnippet(request: TryItOutRequest): string {
@@ -953,6 +1018,76 @@ export function generateCurlSnippet(request: TryItOutRequest): string {
   }
 
   return args.join(' \\\n  ');
+}
+
+export function generateFetchSnippet(request: TryItOutRequest): string {
+  const initEntries = [`method: ${JSON.stringify(request.method)}`];
+  const headers = getRequestHeadersWithCookies(request);
+
+  if (Object.keys(headers).length) {
+    initEntries.push(`headers: ${JSON.stringify(headers, null, 2)}`);
+  }
+
+  if (request.body !== undefined) {
+    initEntries.push(`body: ${JSON.stringify(request.body)}`);
+  }
+
+  return `fetch(${JSON.stringify(request.url)}, {\n  ${initEntries.join(',\n  ')}\n});`;
+}
+
+export function generateHttpieSnippet(request: TryItOutRequest): string {
+  const args = ['http', request.method, shellQuote(request.url)];
+  const headers = getRequestHeadersWithCookies(request);
+
+  for (const [name, value] of Object.entries(headers)) {
+    args.push(shellQuote(`${name}:${value}`));
+  }
+
+  if (request.body !== undefined) {
+    args.push('--raw', shellQuote(request.body));
+  }
+
+  return args.join(' \\\n  ');
+}
+
+export function generatePythonSnippet(request: TryItOutRequest): string {
+  const lines = ['import requests', '', `response = requests.request(`, `    ${JSON.stringify(request.method)},`, `    ${JSON.stringify(request.url)},`];
+  const headers = getRequestHeadersWithCookies(request);
+
+  if (Object.keys(headers).length) {
+    lines.push(`    headers=${toPythonLiteral(headers)},`);
+  }
+
+  if (request.body !== undefined) {
+    lines.push(`    data=${JSON.stringify(request.body)},`);
+  }
+
+  lines.push(')');
+  return lines.join('\n');
+}
+
+export function generateRequestSnippet(request: TryItOutRequest, language: TryItOutRequestSnippetLanguage): string {
+  if (language === 'fetch') {
+    return generateFetchSnippet(request);
+  }
+
+  if (language === 'httpie') {
+    return generateHttpieSnippet(request);
+  }
+
+  if (language === 'python') {
+    return generatePythonSnippet(request);
+  }
+
+  return generateCurlSnippet(request);
+}
+
+export function applyTryItOutResponseInterceptor(
+  response: TryItOutResponse,
+  input: TryItOutRequestInput,
+  request: TryItOutRequest,
+): TryItOutResponse {
+  return input.interceptors?.response ? input.interceptors.response(response, { input, request }) : response;
 }
 
 function mergeParameters(pathParameters: Array<ParameterObject | ReferenceObject> = [], operationParameters: Array<ParameterObject | ReferenceObject> = []) {
@@ -1045,6 +1180,43 @@ function getParameterSeparator(style: ParameterStyle) {
   return ',';
 }
 
+function serializeMatrixParameter(name: string, value: SerializableParameterValue, explode: boolean): SerializedParameterPart {
+  if (Array.isArray(value)) {
+    const serialized = value.map(stringifyParameterValue);
+    return { name, value: explode ? serialized.map((item) => `;${name}=${item}`).join('') : `;${name}=${serialized.join(',')}` };
+  }
+
+  if (isObject(value)) {
+    const entries = Object.entries(value);
+    return {
+      name,
+      value: explode
+        ? entries.map(([key, item]) => `;${key}=${stringifyParameterValue(item)}`).join('')
+        : `;${name}=${entries.flatMap(([key, item]) => [key, stringifyParameterValue(item)]).join(',')}`,
+    };
+  }
+
+  return { name, value: `;${name}=${stringifyParameterValue(value)}` };
+}
+
+function serializeLabelParameter(name: string, value: SerializableParameterValue, explode: boolean): SerializedParameterPart {
+  if (Array.isArray(value)) {
+    return { name, value: `.${value.map(stringifyParameterValue).join(explode ? '.' : ',')}` };
+  }
+
+  if (isObject(value)) {
+    const entries = Object.entries(value);
+    return {
+      name,
+      value: `.${entries
+        .flatMap(([key, item]) => (explode ? [`${key}=${stringifyParameterValue(item)}`] : [key, stringifyParameterValue(item)]))
+        .join(explode ? '.' : ',')}`,
+    };
+  }
+
+  return { name, value: `.${stringifyParameterValue(value)}` };
+}
+
 function serializeDeepObjectPart(name: string, value: unknown): SerializedParameterPart[] {
   if (value === undefined || value === null) {
     return [];
@@ -1074,7 +1246,7 @@ function stringifyParameterValue(value: unknown): string {
 }
 
 function replacePathParameter(path: string, name: string, value: string) {
-  const encodedValue = encodeUriPathValue(value);
+  const encodedValue = encodePathParameterValue(value);
   return path.replace(new RegExp(`\\{${escapeRegExp(name)}\\}`, 'g'), encodedValue);
 }
 
@@ -1223,6 +1395,14 @@ function encodeUriPathValue(value: string) {
     .join('/');
 }
 
+function encodePathParameterValue(value: string) {
+  return encodeUriPathValue(value)
+    .replace(/%3B/gi, ';')
+    .replace(/%3D/gi, '=')
+    .replace(/%2C/gi, ',')
+    .replace(/%2E/gi, '.');
+}
+
 function trimTrailingSlash(value: string) {
   return value.length > 1 ? value.replace(/\/+$/, '') : value;
 }
@@ -1233,6 +1413,19 @@ function escapeRegExp(value: string) {
 
 function shellQuote(value: string) {
   return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+function getRequestHeadersWithCookies(request: TryItOutRequest) {
+  const cookieHeader = Object.entries(request.cookies)
+    .map(([name, value]) => `${name}=${value}`)
+    .join('; ');
+
+  return cookieHeader ? { ...request.headers, Cookie: cookieHeader } : { ...request.headers };
+}
+
+function toPythonLiteral(value: Record<string, string>) {
+  const entries = Object.entries(value).map(([key, item]) => `${JSON.stringify(key)}: ${JSON.stringify(item)}`);
+  return `{${entries.join(', ')}}`;
 }
 
 function getParameterKey(parameter: ParameterObject | ReferenceObject) {
