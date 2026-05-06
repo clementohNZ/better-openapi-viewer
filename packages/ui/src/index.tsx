@@ -8,7 +8,11 @@ import {
   getSecuritySchemes,
   getSchemaTree,
   groupOperationsByTag,
+  isSubmitMethodSupported,
+  mergeViewerConfig,
   normalizeResponses,
+  sortOperations,
+  sortOperationTags,
   type BasicAuthCredentials,
   type ExampleObject,
   type ExternalDocumentationObject,
@@ -30,26 +34,31 @@ import {
   type ServerObject,
   type TryItOutAuthCredentials,
   type TryItOutRequest,
+  type ViewerConfig,
 } from '@better-openapi-viewer/core';
 
 export type BetterOpenApiViewerProps = {
   document: OpenAPIObject;
+  config?: ViewerConfig;
   persistAuthorization?: boolean;
 };
 
-export function BetterOpenApiViewer({ document, persistAuthorization = false }: BetterOpenApiViewerProps) {
+export function BetterOpenApiViewer({ document, config, persistAuthorization }: BetterOpenApiViewerProps) {
+  const viewerConfig = useMemo(() => mergeViewerConfig(config, { persistAuthorization }), [config, persistAuthorization]);
   const [query, setQuery] = useState('');
   const [selectedMethods, setSelectedMethods] = useState<HttpMethod[]>([]);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [authFilter, setAuthFilter] = useState<NonNullable<OperationFilter['auth']>>('any');
   const [deprecatedFilter, setDeprecatedFilter] = useState('any');
   const [selectedContentTypes, setSelectedContentTypes] = useState<string[]>([]);
-  const [expandedOperations, setExpandedOperations] = useState<Set<string>>(() => new Set());
-  const operations = useMemo(() => getOperations(document), [document]);
+  const operations = useMemo(() => sortOperations(getOperations(document), viewerConfig.operationsSorter), [document, viewerConfig.operationsSorter]);
+  const [expandedOperations, setExpandedOperations] = useState<Set<string>>(() =>
+    viewerConfig.defaultExpansion === 'full' ? new Set(operations.map((operation) => operation.id)) : new Set(),
+  );
   const securitySchemes = useMemo(() => getSupportedSecuritySchemes(document), [document]);
   const componentSchemas = useMemo(() => getComponentSchemas(document), [document]);
   const [authCredentials, setAuthCredentials] = useState<TryItOutAuthCredentials>(() =>
-    persistAuthorization ? readPersistedAuthCredentials(document) : {},
+    viewerConfig.persistAuthorization ? readPersistedAuthCredentials(document) : {},
   );
   const methodOptions = useMemo(() => getCountedOptions(operations, (operation) => [operation.method]), [operations]);
   const tagOptions = useMemo(() => getCountedOptions(operations, (operation) => operation.tags), [operations]);
@@ -76,18 +85,26 @@ export function BetterOpenApiViewer({ document, persistAuthorization = false }: 
     Number(deprecatedFilter !== 'any') +
     selectedContentTypes.length;
   const filteredOperations = useMemo(
-    () =>
-      filterOperations(operations, {
+    () => {
+      if (viewerConfig.filter === false) {
+        return operations;
+      }
+
+      return filterOperations(operations, {
         query,
         methods: selectedMethods,
         tags: selectedTags,
         auth: authFilter,
         deprecated: deprecatedFilter === 'any' ? undefined : deprecatedFilter === 'deprecated',
         contentTypes: selectedContentTypes,
-      }),
-    [authFilter, deprecatedFilter, operations, query, selectedContentTypes, selectedMethods, selectedTags],
+      });
+    },
+    [authFilter, deprecatedFilter, operations, query, selectedContentTypes, selectedMethods, selectedTags, viewerConfig.filter],
   );
-  const groupedOperations = useMemo(() => groupOperationsByTag(filteredOperations, document.tags), [document.tags, filteredOperations]);
+  const groupedOperations = useMemo(
+    () => sortOperationTags(groupOperationsByTag(filteredOperations, document.tags), viewerConfig.tagsSorter),
+    [document.tags, filteredOperations, viewerConfig.tagsSorter],
+  );
 
   const toggleOperation = (operationId: string) => {
     setExpandedOperations((current) => {
@@ -116,7 +133,7 @@ export function BetterOpenApiViewer({ document, persistAuthorization = false }: 
   const updateAuthCredentials = (credentials: TryItOutAuthCredentials) => {
     setAuthCredentials(credentials);
 
-    if (persistAuthorization) {
+    if (viewerConfig.persistAuthorization) {
       writePersistedAuthCredentials(document, credentials);
     }
   };
@@ -132,7 +149,7 @@ export function BetterOpenApiViewer({ document, persistAuthorization = false }: 
       <AuthorizePanel
         credentials={authCredentials}
         onChange={updateAuthCredentials}
-        persistAuthorization={persistAuthorization}
+        persistAuthorization={viewerConfig.persistAuthorization}
         schemes={securitySchemes}
       />
 
@@ -143,88 +160,92 @@ export function BetterOpenApiViewer({ document, persistAuthorization = false }: 
         <p>
           Showing {filteredOperations.length} of {operations.length} operations.
         </p>
-        <label>
-          Search endpoints
-          <input
-            type="search"
-            value={query}
-            onChange={(event) => setQuery(event.currentTarget.value)}
-            placeholder="Method, path, tag, summary, parameter..."
-          />
-        </label>
-        <FilterFieldset legend="Methods">
-          {methodOptions.map(({ value, count }) => (
-            <CheckboxFilter
-              key={value}
-              label={value.toUpperCase()}
-              count={count}
-              checked={selectedMethods.includes(value as HttpMethod)}
-              onChange={() => setSelectedMethods((current) => toggleArrayValue(current, value as HttpMethod))}
-            />
-          ))}
-        </FilterFieldset>
-        <FilterFieldset legend="Tags">
-          {tagOptions.map(({ value, count }) => (
-            <CheckboxFilter
-              key={value}
-              label={value}
-              count={count}
-              checked={selectedTags.includes(value)}
-              onChange={() => setSelectedTags((current) => toggleArrayValue(current, value))}
-            />
-          ))}
-        </FilterFieldset>
-        <FilterFieldset legend="Auth">
-          <RadioFilter label="Any auth state" count={operations.length} checked={authFilter === 'any'} onChange={() => setAuthFilter('any')} />
-          <RadioFilter
-            label="Requires auth"
-            count={authCounts.required}
-            checked={authFilter === 'required'}
-            onChange={() => setAuthFilter('required')}
-          />
-          <RadioFilter label="No auth" count={authCounts.none} checked={authFilter === 'none'} onChange={() => setAuthFilter('none')} />
-        </FilterFieldset>
-        <FilterFieldset legend="Status">
-          <RadioFilter
-            label="Any status"
-            count={operations.length}
-            checked={deprecatedFilter === 'any'}
-            onChange={() => setDeprecatedFilter('any')}
-            name="deprecated-filter"
-          />
-          <RadioFilter
-            label="Active"
-            count={deprecatedCounts.active}
-            checked={deprecatedFilter === 'active'}
-            onChange={() => setDeprecatedFilter('active')}
-            name="deprecated-filter"
-          />
-          <RadioFilter
-            label="Deprecated"
-            count={deprecatedCounts.deprecated}
-            checked={deprecatedFilter === 'deprecated'}
-            onChange={() => setDeprecatedFilter('deprecated')}
-            name="deprecated-filter"
-          />
-        </FilterFieldset>
-        {contentTypeOptions.length ? (
-          <FilterFieldset legend="Content types">
-            {contentTypeOptions.map(({ value, count }) => (
-              <CheckboxFilter
-                key={value}
-                label={value}
-                count={count}
-                checked={selectedContentTypes.includes(value)}
-                onChange={() => setSelectedContentTypes((current) => toggleArrayValue(current, value))}
+        {viewerConfig.filter === false ? null : (
+          <>
+            <label>
+              Search endpoints
+              <input
+                type="search"
+                value={query}
+                onChange={(event) => setQuery(event.currentTarget.value)}
+                placeholder={typeof viewerConfig.filter === 'string' ? viewerConfig.filter : 'Method, path, tag, summary, parameter...'}
               />
-            ))}
-          </FilterFieldset>
-        ) : null}
-        {activeFilterCount ? (
-          <button type="button" onClick={resetFilters}>
-            Reset filters ({activeFilterCount})
-          </button>
-        ) : null}
+            </label>
+            <FilterFieldset legend="Methods">
+              {methodOptions.map(({ value, count }) => (
+                <CheckboxFilter
+                  key={value}
+                  label={value.toUpperCase()}
+                  count={count}
+                  checked={selectedMethods.includes(value as HttpMethod)}
+                  onChange={() => setSelectedMethods((current) => toggleArrayValue(current, value as HttpMethod))}
+                />
+              ))}
+            </FilterFieldset>
+            <FilterFieldset legend="Tags">
+              {tagOptions.map(({ value, count }) => (
+                <CheckboxFilter
+                  key={value}
+                  label={value}
+                  count={count}
+                  checked={selectedTags.includes(value)}
+                  onChange={() => setSelectedTags((current) => toggleArrayValue(current, value))}
+                />
+              ))}
+            </FilterFieldset>
+            <FilterFieldset legend="Auth">
+              <RadioFilter label="Any auth state" count={operations.length} checked={authFilter === 'any'} onChange={() => setAuthFilter('any')} />
+              <RadioFilter
+                label="Requires auth"
+                count={authCounts.required}
+                checked={authFilter === 'required'}
+                onChange={() => setAuthFilter('required')}
+              />
+              <RadioFilter label="No auth" count={authCounts.none} checked={authFilter === 'none'} onChange={() => setAuthFilter('none')} />
+            </FilterFieldset>
+            <FilterFieldset legend="Status">
+              <RadioFilter
+                label="Any status"
+                count={operations.length}
+                checked={deprecatedFilter === 'any'}
+                onChange={() => setDeprecatedFilter('any')}
+                name="deprecated-filter"
+              />
+              <RadioFilter
+                label="Active"
+                count={deprecatedCounts.active}
+                checked={deprecatedFilter === 'active'}
+                onChange={() => setDeprecatedFilter('active')}
+                name="deprecated-filter"
+              />
+              <RadioFilter
+                label="Deprecated"
+                count={deprecatedCounts.deprecated}
+                checked={deprecatedFilter === 'deprecated'}
+                onChange={() => setDeprecatedFilter('deprecated')}
+                name="deprecated-filter"
+              />
+            </FilterFieldset>
+            {contentTypeOptions.length ? (
+              <FilterFieldset legend="Content types">
+                {contentTypeOptions.map(({ value, count }) => (
+                  <CheckboxFilter
+                    key={value}
+                    label={value}
+                    count={count}
+                    checked={selectedContentTypes.includes(value)}
+                    onChange={() => setSelectedContentTypes((current) => toggleArrayValue(current, value))}
+                  />
+                ))}
+              </FilterFieldset>
+            ) : null}
+            {activeFilterCount ? (
+              <button type="button" onClick={resetFilters}>
+                Reset filters ({activeFilterCount})
+              </button>
+            ) : null}
+          </>
+        )}
 
         <nav aria-label="Endpoint navigation">
           {groupedOperations.length ? (
@@ -297,7 +318,14 @@ export function BetterOpenApiViewer({ document, persistAuthorization = false }: 
                           <Callbacks operation={operation} document={document} />
                           <Security security={operation.security} schemes={securitySchemes} />
                           <Servers servers={operation.servers} />
-                          <TryItOut authCredentials={authCredentials} operation={operation} document={document} />
+                          {isSubmitMethodSupported(operation.method, viewerConfig) ? (
+                            <TryItOut
+                              authCredentials={authCredentials}
+                              displayRequestDuration={viewerConfig.displayRequestDuration}
+                              operation={operation}
+                              document={document}
+                            />
+                          ) : null}
                         </div>
                       ) : null}
                     </article>
@@ -973,10 +1001,12 @@ type TryItOutState = {
 
 function TryItOut({
   authCredentials,
+  displayRequestDuration,
   operation,
   document,
 }: {
   authCredentials: TryItOutAuthCredentials;
+  displayRequestDuration: boolean;
   operation: NormalizedOperation;
   document: OpenAPIObject;
 }) {
@@ -1117,7 +1147,7 @@ function TryItOut({
               Reset inputs
             </button>
           </div>
-          <TryItOutResult state={state} />
+          <TryItOutResult displayRequestDuration={displayRequestDuration} state={state} />
         </div>
       ) : null}
     </section>
@@ -1156,7 +1186,7 @@ function GeneratedRequest({ request }: { request: TryItOutRequest }) {
   );
 }
 
-function TryItOutResult({ state }: { state: TryItOutState }) {
+function TryItOutResult({ displayRequestDuration, state }: { displayRequestDuration: boolean; state: TryItOutState }) {
   if (state.error) {
     return <p role="alert">Request failed: {state.error}</p>;
   }
@@ -1175,10 +1205,12 @@ function TryItOutResult({ state }: { state: TryItOutState }) {
             {state.response.status} {state.response.statusText}
           </dd>
         </div>
-        <div>
-          <dt>Duration</dt>
-          <dd>{state.response.durationMs} ms</dd>
-        </div>
+        {displayRequestDuration ? (
+          <div>
+            <dt>Duration</dt>
+            <dd>{state.response.durationMs} ms</dd>
+          </div>
+        ) : null}
         <div>
           <dt>Headers</dt>
           <dd>
