@@ -11,9 +11,10 @@ Framework-agnostic OpenAPI normalization and viewer primitives.
 - Schema tree, schema type, and schema/media/response example helpers for later UI rendering.
 - Response normalization helpers with status range/category classification and Swagger 2.0 `produces` fallbacks.
 - Request body media type discovery for OpenAPI 3.x `requestBody.content` and Swagger 2.0 body/form parameters.
-- Security scheme extraction across OpenAPI 3.x `components.securitySchemes` and Swagger 2.0 `securityDefinitions`.
+- Parameter and request body validation helpers for required values, schema types, enums, constants, object properties, arrays, and composition guards.
+- Security scheme extraction across OpenAPI 3.x `components.securitySchemes` and Swagger 2.0 `securityDefinitions`, including OAuth flow metadata and OpenID Connect discovery URLs.
 - Markdown-safe text escaping for descriptions that need to be rendered through Markdown-aware surfaces.
-- Try It Out request primitives for server selection and variable substitution, common parameter serialization styles (`form`, `simple`, `spaceDelimited`, `pipeDelimited`, `deepObject`, `matrix`, and `label`), request URL/header/cookie/body construction, basic/bearer/api-key credential application, request/response interceptor hooks, and curl/fetch/httpie/python snippet generation.
+- Try It Out request primitives for server selection and variable substitution, server variable defaults/options, common parameter serialization styles (`form`, `simple`, `spaceDelimited`, `pipeDelimited`, `deepObject`, `matrix`, and `label`), request URL/header/cookie/body construction, basic/bearer/api-key/OAuth/OpenID credential application, preauthorization credential merging, request/response interceptor hooks, and curl/fetch/httpie/python snippet generation.
 - Viewer configuration primitives for route path, JSON path, title, layout, default expansion, deep linking, filter, request duration display, persisted auth, syntax highlighting, supported submit methods, operation/tag sorters, model expansion depth, and plugin metadata.
 
 ## Viewer config
@@ -60,3 +61,53 @@ const response = applyTryItOutResponseInterceptor({ status: 200, headers: {}, bo
 ```
 
 Use `resolveReference(document, ref, { loader })` when a renderer or adapter wants to resolve external references. Internal `#/...` pointers resolve from the provided document first; non-internal refs are fetched only when a loader is supplied.
+
+## Validation and auth metadata
+
+Core exposes typed helpers that renderer packages can call before sending a Try It Out request.
+
+```ts
+import {
+  getOpenIdConnectUrls,
+  getSecuritySchemes,
+  getSecuritySchemeMetadata,
+  mergePreauthorizedCredentials,
+  validateParameterValues,
+  validateRequestBody,
+} from '@better-openapi-viewer/core';
+
+const parameterResult = validateParameterValues({
+  parameters: operation.parameters,
+  values: { id: 42 },
+});
+
+const bodyResult = validateRequestBody({
+  requestBody: operation.requestBody,
+  body: { name: 'Ada' },
+  contentType: 'application/json',
+});
+
+const securityMetadata = getSecuritySchemeMetadata(getSecuritySchemes(document));
+const openIdUrls = getOpenIdConnectUrls(getSecuritySchemes(document));
+const oauthFlows = securityMetadata.flatMap((scheme) => scheme.oauthFlows);
+
+const auth = mergePreauthorizedCredentials({
+  auth: {
+    bearerAuth: { value: 'token' },
+    oauth: { value: 'access-token', scopes: ['read:users'] },
+  },
+});
+```
+
+## Server variables
+
+Server variable helpers expose defaults and allowed options without binding consumers to a UI.
+
+```ts
+import { getServerVariableDefaults, getServerVariableOptions, normalizeServerVariables, selectServerUrl } from '@better-openapi-viewer/core';
+
+const variables = normalizeServerVariables(server, { environment: 'staging' });
+const url = selectServerUrl([server], { variables });
+const defaults = getServerVariableDefaults(server);
+const options = getServerVariableOptions(server);
+```

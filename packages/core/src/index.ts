@@ -53,6 +53,8 @@ export type ServerObject = {
   variables?: Record<string, { default: string | number | boolean; enum?: Array<string | number | boolean>; description?: string }>;
 };
 
+export type ServerVariableObject = NonNullable<ServerObject['variables']>[string];
+
 export type SecurityRequirementObject = Record<string, string[]>;
 
 export type PathItemObject = {
@@ -323,14 +325,52 @@ export type BasicAuthCredentials = {
   password: string;
 };
 
+export type TokenAuthCredentials = {
+  value: string;
+  tokenType?: string;
+  expiresAt?: string | number | Date;
+  scopes?: string[];
+};
+
+export type OAuthFlowType = 'implicit' | 'password' | 'clientCredentials' | 'authorizationCode';
+
+export type OAuthFlowObject = {
+  authorizationUrl?: string;
+  tokenUrl?: string;
+  refreshUrl?: string;
+  scopes?: Record<string, string>;
+};
+
+export type OAuthFlowsObject = Partial<Record<OAuthFlowType, OAuthFlowObject>>;
+
+export type OAuthFlowMetadata = OAuthFlowObject & {
+  type: OAuthFlowType;
+  scopes: Record<string, string>;
+};
+
+export type SecuritySchemeMetadata = {
+  name: string;
+  type: SecuritySchemeObject['type'];
+  description?: string;
+  scheme?: string;
+  bearerFormat?: string;
+  apiKeyLocation?: SecuritySchemeObject['in'];
+  apiKeyName?: string;
+  oauthFlows: OAuthFlowMetadata[];
+  openIdConnectUrl?: string;
+};
+
 export type SecurityCredential =
   | string
   | BasicAuthCredentials
-  | {
-      value: string;
-    };
+  | TokenAuthCredentials;
 
 export type TryItOutAuthCredentials = Record<string, SecurityCredential | undefined>;
+
+export type PreauthorizeConfig = {
+  auth?: TryItOutAuthCredentials;
+  credentials?: TryItOutAuthCredentials;
+};
 
 export type TryItOutResponse = {
   status: number;
@@ -426,6 +466,39 @@ export type SchemaTreeOptions = {
   path?: string;
   required?: boolean;
   maxDepth?: number;
+};
+
+export type ValidationIssue = {
+  code: string;
+  message: string;
+  path: string;
+  expected?: string;
+  actual?: string;
+};
+
+export type ValidationResult = {
+  valid: boolean;
+  issues: ValidationIssue[];
+};
+
+export type ParameterValidationInput = {
+  parameters: Array<ParameterObject | ReferenceObject>;
+  values?: Record<string, unknown>;
+};
+
+export type RequestBodyValidationInput = {
+  requestBody?: RequestBodyObject | ReferenceObject | unknown;
+  body?: unknown;
+  contentType?: string;
+};
+
+export type NormalizedServerVariable = {
+  name: string;
+  defaultValue: string | number | boolean;
+  enumValues: Array<string | number | boolean>;
+  description?: string;
+  value: string | number | boolean;
+  valid: boolean;
 };
 
 const HTTP_METHODS: HttpMethod[] = ['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace'];
@@ -830,6 +903,109 @@ export function getSecuritySchemes(document: Pick<OpenAPIObject, 'components' | 
   return { ...swaggerSchemes, ...openApiSchemes };
 }
 
+export function getSecuritySchemeMetadata(
+  schemes: Record<string, SecuritySchemeObject | ReferenceObject | unknown>,
+): SecuritySchemeMetadata[] {
+  return Object.entries(schemes).flatMap(([name, scheme]) => {
+    if (!isSecuritySchemeObject(scheme)) {
+      return [];
+    }
+
+    return [
+      {
+        name,
+        type: scheme.type,
+        description: scheme.description,
+        scheme: scheme.scheme,
+        bearerFormat: scheme.bearerFormat,
+        apiKeyLocation: scheme.in,
+        apiKeyName: scheme.name,
+        oauthFlows: getOAuthFlows(scheme),
+        openIdConnectUrl: scheme.type === 'openIdConnect' ? scheme.openIdConnectUrl : undefined,
+      },
+    ];
+  });
+}
+
+export function getOAuthFlows(scheme: SecuritySchemeObject | ReferenceObject | unknown): OAuthFlowMetadata[] {
+  if (!isSecuritySchemeObject(scheme) || scheme.type !== 'oauth2' || !isObject(scheme.flows)) {
+    return [];
+  }
+
+  const flows = scheme.flows;
+  return (['implicit', 'password', 'clientCredentials', 'authorizationCode'] as const).flatMap((type) => {
+    const flow = flows[type];
+    if (!isObject(flow)) {
+      return [];
+    }
+
+    return [
+      {
+        type,
+        authorizationUrl: typeof flow.authorizationUrl === 'string' ? flow.authorizationUrl : undefined,
+        tokenUrl: typeof flow.tokenUrl === 'string' ? flow.tokenUrl : undefined,
+        refreshUrl: typeof flow.refreshUrl === 'string' ? flow.refreshUrl : undefined,
+        scopes: isStringRecord(flow.scopes) ? flow.scopes : {},
+      },
+    ];
+  });
+}
+
+export function getOpenIdConnectUrls(schemes: Record<string, SecuritySchemeObject | ReferenceObject | unknown>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(schemes).flatMap(([name, scheme]) =>
+      isSecuritySchemeObject(scheme) && scheme.type === 'openIdConnect' && scheme.openIdConnectUrl ? [[name, scheme.openIdConnectUrl]] : [],
+    ),
+  );
+}
+
+export function mergePreauthorizedCredentials(...configs: Array<PreauthorizeConfig | TryItOutAuthCredentials | undefined>): TryItOutAuthCredentials {
+  return configs.reduce<TryItOutAuthCredentials>((merged, config) => {
+    if (!config) {
+      return merged;
+    }
+
+    const credentials = isPreauthorizeConfig(config) ? (config.auth ?? config.credentials ?? {}) : config;
+    return { ...merged, ...credentials };
+  }, {});
+}
+
+export function validateParameterValues(input: ParameterValidationInput): ValidationResult {
+  const issues = input.parameters.flatMap((parameter) => {
+    if (isReferenceObject(parameter)) {
+      return [];
+    }
+
+    const value = input.values?.[parameter.name];
+    const path = `parameters.${parameter.name}`;
+
+    if (value === undefined || value === null || value === '') {
+      return parameter.required ? [{ code: 'required', message: `${parameter.name} is required.`, path }] : [];
+    }
+
+    return validateValueAgainstSchema(value, parameter.schema, path);
+  });
+
+  return { valid: issues.length === 0, issues };
+}
+
+export function validateRequestBody(input: RequestBodyValidationInput): ValidationResult {
+  const requestBody = input.requestBody;
+
+  if (!isObject(requestBody) || isReferenceObject(requestBody)) {
+    return { valid: true, issues: [] };
+  }
+
+  if (input.body === undefined || input.body === null || input.body === '') {
+    const issues = requestBody.required ? [{ code: 'required', message: 'Request body is required.', path: 'body' }] : [];
+    return { valid: issues.length === 0, issues };
+  }
+
+  const mediaType = getRequestBodyMediaType(requestBody, input.contentType);
+  const issues = validateValueAgainstSchema(input.body, mediaType?.schema, 'body');
+  return { valid: issues.length === 0, issues };
+}
+
 export function getSchemaTree(schema: SchemaObject | ReferenceObject | unknown, options: SchemaTreeOptions = {}): SchemaTreeNode {
   return buildSchemaTreeNode(schema, {
     name: options.name ?? 'schema',
@@ -890,6 +1066,36 @@ export function substituteServerVariables(server: ServerObject, values: Record<s
     const value = values[variableName] ?? variable?.default ?? '';
     return encodeUriPathValue(String(value));
   });
+}
+
+export function getServerVariableDefaults(server: ServerObject | undefined): Record<string, string | number | boolean> {
+  return Object.fromEntries(Object.entries(server?.variables ?? {}).map(([name, variable]) => [name, variable.default]));
+}
+
+export function getServerVariableOptions(server: ServerObject | undefined): NormalizedServerVariable[] {
+  return Object.entries(server?.variables ?? {}).map(([name, variable]) => {
+    const enumValues = variable.enum ? [...variable.enum] : [];
+    return {
+      name,
+      defaultValue: variable.default,
+      enumValues,
+      description: variable.description,
+      value: variable.default,
+      valid: !enumValues.length || enumValues.includes(variable.default),
+    };
+  });
+}
+
+export function normalizeServerVariables(
+  server: ServerObject,
+  values: Record<string, string | number | boolean> = {},
+): Record<string, string | number | boolean> {
+  return Object.fromEntries(
+    Object.entries(server.variables ?? {}).map(([name, variable]) => {
+      const value = values[name] ?? variable.default;
+      return [name, variable.enum?.includes(value) === false ? variable.default : value];
+    }),
+  );
 }
 
 export function serializeParameter(parameter: ParameterObject, value: SerializableParameterValue | undefined): SerializedParameterPart[] {
@@ -1088,6 +1294,111 @@ export function applyTryItOutResponseInterceptor(
   request: TryItOutRequest,
 ): TryItOutResponse {
   return input.interceptors?.response ? input.interceptors.response(response, { input, request }) : response;
+}
+
+function getRequestBodyMediaType(requestBody: RequestBodyObject, preferredContentType?: string): MediaTypeObject | undefined {
+  const content = requestBody.content ?? {};
+  const bareContentType = preferredContentType?.split(';')[0]?.trim();
+  return preferredContentType ? (content[preferredContentType] ?? (bareContentType ? content[bareContentType] : undefined)) : Object.values(content)[0];
+}
+
+function validateValueAgainstSchema(value: unknown, schema: SchemaObject | ReferenceObject | unknown, path: string): ValidationIssue[] {
+  if (!isObject(schema) || isReferenceObject(schema)) {
+    return [];
+  }
+
+  if (value === null) {
+    return schema.nullable || schema.type === 'null' || (Array.isArray(schema.type) && schema.type.includes('null'))
+      ? []
+      : [{ code: 'type', message: `${path} must not be null.`, path, expected: getSchemaType(schema), actual: 'null' }];
+  }
+
+  if (schema.const !== undefined && value !== schema.const) {
+    return [{ code: 'const', message: `${path} must equal ${String(schema.const)}.`, path, expected: String(schema.const), actual: getValueType(value) }];
+  }
+
+  if (Array.isArray(schema.enum) && !schema.enum.includes(value)) {
+    return [{ code: 'enum', message: `${path} must be one of the allowed values.`, path, expected: schema.enum.map(String).join(', '), actual: String(value) }];
+  }
+
+  const typeIssues = validateSchemaType(value, schema, path);
+  if (typeIssues.length) {
+    return typeIssues;
+  }
+
+  const issues: ValidationIssue[] = [];
+
+  if (Array.isArray(schema.allOf)) {
+    issues.push(...schema.allOf.flatMap((item) => validateValueAgainstSchema(value, item, path)));
+  }
+
+  if (Array.isArray(schema.oneOf)) {
+    const matches = schema.oneOf.filter((item) => validateValueAgainstSchema(value, item, path).length === 0);
+    if (matches.length !== 1) {
+      issues.push({ code: 'oneOf', message: `${path} must match exactly one schema.`, path, expected: 'oneOf', actual: `${matches.length} matches` });
+    }
+  }
+
+  if (Array.isArray(schema.anyOf) && !schema.anyOf.some((item) => validateValueAgainstSchema(value, item, path).length === 0)) {
+    issues.push({ code: 'anyOf', message: `${path} must match at least one schema.`, path, expected: 'anyOf', actual: '0 matches' });
+  }
+
+  if (schema.not && validateValueAgainstSchema(value, schema.not, path).length === 0) {
+    issues.push({ code: 'not', message: `${path} must not match the forbidden schema.`, path, expected: 'not', actual: 'matched' });
+  }
+
+  if (Array.isArray(value) && schema.items) {
+    issues.push(...value.flatMap((item, index) => validateValueAgainstSchema(item, schema.items, `${path}[${index}]`)));
+  }
+
+  if (isObject(value)) {
+    const required = Array.isArray(schema.required) ? schema.required.filter((item): item is string => typeof item === 'string') : [];
+    for (const propertyName of required) {
+      if (value[propertyName] === undefined || value[propertyName] === null || value[propertyName] === '') {
+        issues.push({ code: 'required', message: `${path}.${propertyName} is required.`, path: `${path}.${propertyName}` });
+      }
+    }
+
+    if (isObject(schema.properties)) {
+      for (const [propertyName, propertySchema] of Object.entries(schema.properties)) {
+        if (value[propertyName] !== undefined) {
+          issues.push(...validateValueAgainstSchema(value[propertyName], propertySchema, `${path}.${propertyName}`));
+        }
+      }
+    }
+  }
+
+  return issues;
+}
+
+function validateSchemaType(value: unknown, schema: SchemaObject, path: string): ValidationIssue[] {
+  const expectedTypes = Array.isArray(schema.type) ? schema.type : schema.type ? [schema.type] : [];
+  if (!expectedTypes.length) {
+    return [];
+  }
+
+  const matches = expectedTypes.some((type) => {
+    if (type === 'integer') {
+      return Number.isInteger(value);
+    }
+    if (type === 'number') {
+      return typeof value === 'number' && Number.isFinite(value);
+    }
+    if (type === 'array') {
+      return Array.isArray(value);
+    }
+    if (type === 'object') {
+      return isObject(value);
+    }
+    if (type === 'null') {
+      return value === null;
+    }
+    return typeof value === type;
+  });
+
+  return matches
+    ? []
+    : [{ code: 'type', message: `${path} must be ${expectedTypes.join(' or ')}.`, path, expected: expectedTypes.join(' or '), actual: getValueType(value) }];
 }
 
 function mergeParameters(pathParameters: Array<ParameterObject | ReferenceObject> = [], operationParameters: Array<ParameterObject | ReferenceObject> = []) {
@@ -1298,6 +1609,12 @@ function applyAuthCredentials({
       continue;
     }
 
+    if (scheme.type === 'oauth2' || scheme.type === 'openIdConnect') {
+      const tokenType = isTokenAuthCredentials(credential) ? (credential.tokenType ?? 'Bearer') : 'Bearer';
+      headers.Authorization = `${tokenType} ${getCredentialValue(credential)}`;
+      continue;
+    }
+
     if (scheme.type === 'apiKey' && scheme.name) {
       const value = getCredentialValue(credential);
       if (scheme.in === 'header') {
@@ -1355,6 +1672,14 @@ function getCredentialValue(credential: SecurityCredential) {
 function isBasicAuthCredentials(value: SecurityCredential): value is BasicAuthCredentials {
   const candidate = value as Partial<BasicAuthCredentials>;
   return isObject(value) && typeof candidate.username === 'string' && typeof candidate.password === 'string';
+}
+
+function isTokenAuthCredentials(value: SecurityCredential): value is TokenAuthCredentials {
+  return isObject(value) && 'value' in value && typeof value.value === 'string';
+}
+
+function isPreauthorizeConfig(value: PreauthorizeConfig | TryItOutAuthCredentials): value is PreauthorizeConfig {
+  return isObject(value) && ('auth' in value || 'credentials' in value);
 }
 
 function isSecuritySchemeObject(value: unknown): value is SecuritySchemeObject {
@@ -1780,6 +2105,26 @@ function getRefName(ref: string) {
 
 function isReferenceObject(value: unknown): value is ReferenceObject {
   return isObject(value) && typeof value.$ref === 'string' && Object.keys(value).every((key) => key === '$ref' || key === 'summary' || key === 'description');
+}
+
+function isStringRecord(value: unknown): value is Record<string, string> {
+  return isObject(value) && Object.values(value).every((item) => typeof item === 'string');
+}
+
+function getValueType(value: unknown) {
+  if (Array.isArray(value)) {
+    return 'array';
+  }
+
+  if (value === null) {
+    return 'null';
+  }
+
+  if (Number.isInteger(value)) {
+    return 'integer';
+  }
+
+  return typeof value;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
