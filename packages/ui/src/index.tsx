@@ -26,6 +26,7 @@ import {
   type PathItemObject,
   type ReferenceObject,
   type RequestBodyObject,
+  type SchemaObject,
   type SchemaTreeNode,
   type SerializableParameterValue,
   type SecurityCredential,
@@ -40,11 +41,12 @@ import {
 
 export type BetterOpenApiViewerProps = {
   document: OpenAPIObject;
-  config?: ViewerConfig;
+  config?: ViewerConfig & { preauthorizedCredentials?: TryItOutAuthCredentials };
   persistAuthorization?: boolean;
+  preauthorizedCredentials?: TryItOutAuthCredentials;
 };
 
-export function BetterOpenApiViewer({ document, config, persistAuthorization }: BetterOpenApiViewerProps) {
+export function BetterOpenApiViewer({ document, config, persistAuthorization, preauthorizedCredentials }: BetterOpenApiViewerProps) {
   const viewerConfig = useMemo(() => mergeViewerConfig(config, { persistAuthorization }), [config, persistAuthorization]);
   const [query, setQuery] = useState('');
   const [selectedMethods, setSelectedMethods] = useState<HttpMethod[]>([]);
@@ -61,7 +63,7 @@ export function BetterOpenApiViewer({ document, config, persistAuthorization }: 
   const securitySchemes = useMemo(() => getSupportedSecuritySchemes(document), [document]);
   const componentSchemas = useMemo(() => getComponentSchemas(document), [document]);
   const [authCredentials, setAuthCredentials] = useState<TryItOutAuthCredentials>(() =>
-    viewerConfig.persistAuthorization ? readPersistedAuthCredentials(document) : {},
+    mergeCredentials(config?.preauthorizedCredentials, preauthorizedCredentials, viewerConfig.persistAuthorization ? readPersistedAuthCredentials(document) : {}),
   );
   const methodOptions = useMemo(() => getCountedOptions(operations, (operation) => [operation.method]), [operations]);
   const tagOptions = useMemo(() => getCountedOptions(operations, (operation) => operation.tags), [operations]);
@@ -146,7 +148,7 @@ export function BetterOpenApiViewer({ document, config, persistAuthorization }: 
       <header>
         {document.info?.version ? <p>{document.info.version}</p> : null}
         <h1>{document.info?.title ?? 'OpenAPI'}</h1>
-        {document.info?.description ? <p>{document.info.description}</p> : null}
+        {document.info?.description ? <MarkdownText value={document.info.description} /> : null}
         <fieldset aria-label="Viewer theme">
           <legend>Theme</legend>
           <label>
@@ -304,7 +306,7 @@ export function BetterOpenApiViewer({ document, config, persistAuthorization }: 
             <h3 id={`tag-${toDomId(name)}`}>
               {name} ({tagOperations.length})
             </h3>
-            {description ? <p>{description}</p> : null}
+            {description ? <MarkdownText value={description} /> : null}
             {externalDocs ? <ExternalDocsLink docs={externalDocs} /> : null}
 
             <ul>
@@ -460,7 +462,9 @@ function OperationOverview({ document, operation }: { document: OpenAPIObject; o
         {operation.description ? (
           <div>
             <dt>Description</dt>
-            <dd>{operation.description}</dd>
+            <dd>
+              <MarkdownText value={operation.description} />
+            </dd>
           </div>
         ) : null}
         <div>
@@ -522,7 +526,7 @@ function Parameters({ parameters }: { parameters: Array<ParameterObject | Refere
                   </th>
                   <td>{parameter.in}</td>
                   <td>{parameter.required ? 'Yes' : 'No'}</td>
-                  <td>{parameter.description ?? 'No description.'}</td>
+                  <td>{parameter.description ? <MarkdownText value={parameter.description} /> : 'No description.'}</td>
                 </tr>
               ),
             )}
@@ -565,7 +569,7 @@ function RequestBody({ requestBody }: { requestBody: unknown }) {
   return (
     <section>
       <h4>Request body</h4>
-      {requestBody.description ? <p>{requestBody.description}</p> : null}
+      {requestBody.description ? <MarkdownText value={requestBody.description} /> : null}
       <p>{requestBody.required ? 'Required.' : 'Optional.'}</p>
       {mediaEntries.length ? (
         <ul>
@@ -601,7 +605,7 @@ function Responses({ operation, document }: { operation: NormalizedOperation; do
                 <h5>
                   <code>{response.statusCode}</code> {getResponseStatusLabel(response.statusRange, response.category)}
                 </h5>
-                {response.description ? <p>{response.description}</p> : null}
+                {response.description ? <MarkdownText value={response.description} /> : null}
                 {response.contentTypes.length ? (
                   <ul>
                     {response.contentTypes.map((contentType) => (
@@ -678,7 +682,7 @@ function ExampleValue({ example }: { example: ExampleObject | ReferenceObject | 
     return (
       <div>
         {example.summary ? <p>{example.summary}</p> : null}
-        {example.description ? <p>{example.description}</p> : null}
+        {example.description ? <MarkdownText value={example.description} /> : null}
         {example.externalValue ? <ExternalLink href={example.externalValue}>{example.externalValue}</ExternalLink> : null}
         {example.value !== undefined ? <UnknownValue value={example.value} /> : null}
       </div>
@@ -709,7 +713,7 @@ function SchemaTreeNodeView({ node }: { node: SchemaTreeNode }) {
           </span>
         ) : null}
       </summary>
-      {node.description ? <p>{node.description}</p> : null}
+      {node.description ? <MarkdownText value={node.description} /> : null}
       {node.enumValues?.length ? (
         <p>
           Enum: <code>{node.enumValues.map((value) => JSON.stringify(value)).join(', ')}</code>
@@ -804,7 +808,7 @@ function PathItemSummary({ pathItem }: { pathItem: PathItemObject }) {
   return (
     <div>
       {pathItem.summary ? <p>{pathItem.summary}</p> : null}
-      {pathItem.description ? <p>{pathItem.description}</p> : null}
+      {pathItem.description ? <MarkdownText value={pathItem.description} /> : null}
       {operations.length ? (
         <ul>
           {operations.map(({ method, operation }) => (
@@ -891,6 +895,7 @@ function SecuritySchemeCredentialField({
   const id = `auth-${toDomId(name)}`;
   const descriptionId = scheme.description ? `${id}-description` : undefined;
   const schemeLabel = getSecuritySchemeLabel(scheme);
+  const metadata = getSecuritySchemeMetadata(scheme);
 
   if (scheme.type === 'http' && scheme.scheme?.toLowerCase() === 'basic') {
     const basicCredential = isBasicCredential(credential) ? credential : { username: '', password: '' };
@@ -900,7 +905,7 @@ function SecuritySchemeCredentialField({
         <legend>
           {name} ({schemeLabel})
         </legend>
-        {scheme.description ? <p id={descriptionId}>{scheme.description}</p> : null}
+        {scheme.description ? <div id={descriptionId}><MarkdownText value={scheme.description} /></div> : null}
         <label>
           Username
           <input
@@ -939,7 +944,19 @@ function SecuritySchemeCredentialField({
           onChange={(event) => onChange(event.currentTarget.value)}
         />
       </label>
-      {scheme.description ? <span id={descriptionId}>{scheme.description}</span> : null}
+      {scheme.description ? <span id={descriptionId}><MarkdownText value={scheme.description} /></span> : null}
+      {metadata.length ? (
+        <dl>
+          {metadata.map(([label, value]) => (
+            <div key={label}>
+              <dt>{label}</dt>
+              <dd>
+                <UnknownValue value={value} />
+              </dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
       <button type="button" onClick={() => onChange(undefined)} disabled={!credential}>
         Clear {name}
       </button>
@@ -1009,13 +1026,17 @@ type TryItOutResponse = {
 type TryItOutState = {
   enabled: boolean;
   serverUrl: string;
+  serverVariables: Record<string, string>;
   contentType: string;
   parameters: Record<string, string>;
   bodyText: string;
   bodyFormat: 'json' | 'text';
+  multipartFields: Record<string, string>;
+  multipartFiles: Record<string, File | undefined>;
   snippetLanguage: SnippetLanguage;
   response?: TryItOutResponse;
   error?: string;
+  validationMessages: string[];
   isSending: boolean;
 };
 
@@ -1040,8 +1061,11 @@ function TryItOut({
   const parameterFields = useMemo(() => operation.parameters.filter((parameter): parameter is ParameterObject => !isReferenceObject(parameter)), [operation.parameters]);
   const request = useMemo(
     () => buildTryItOutRequestForState({ authCredentials, document, operation, state }),
-    [authCredentials, document, operation, state.bodyFormat, state.bodyText, state.contentType, state.parameters, state.serverUrl],
+    [authCredentials, document, operation, state.bodyFormat, state.bodyText, state.contentType, state.parameters, state.serverUrl, state.serverVariables],
   );
+  const selectedServer = useMemo(() => getServerOptions(operation).find((server) => server.url === state.serverUrl) ?? getServerOptions(operation)[0], [operation, state.serverUrl]);
+  const requestBodySchema = getRequestBodyMediaTypes(operation)[state.contentType]?.schema;
+  const validationMessages = useMemo(() => validateTryItOutState(operation, state), [operation, state]);
 
   const updateParameter = (name: string, value: string) => {
     setState((current) => ({ ...current, parameters: { ...current.parameters, [name]: value } }));
@@ -1051,14 +1075,20 @@ function TryItOut({
     abortControllerRef.current?.abort();
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
-    setState((current) => ({ ...current, error: undefined, isSending: true, response: undefined }));
+    const messages = validateTryItOutState(operation, state);
+    if (messages.length) {
+      setState((current) => ({ ...current, error: undefined, response: undefined, validationMessages: messages }));
+      return;
+    }
+
+    setState((current) => ({ ...current, error: undefined, isSending: true, response: undefined, validationMessages: [] }));
     const startedAt = performance.now();
 
     try {
       const response = await fetch(request.url, {
         method: request.method,
-        headers: request.headers,
-        body: request.body,
+        headers: isMultipartContentType(state.contentType) ? getHeadersWithoutContentType(request.headers) : request.headers,
+        body: isMultipartContentType(state.contentType) ? buildMultipartFormData(state) : request.body,
         signal: abortController.signal,
       });
       const body = await response.text();
@@ -1125,7 +1155,14 @@ function TryItOut({
             <legend>Request setup</legend>
             <label>
               Server
-              <select value={state.serverUrl} onChange={(event) => setState((current) => ({ ...current, serverUrl: event.currentTarget.value }))}>
+              <select
+                value={state.serverUrl}
+                onChange={(event) => {
+                  const serverUrl = event.currentTarget.value;
+                  const server = getServerOptions(operation).find((option) => option.url === serverUrl);
+                  setState((current) => ({ ...current, serverUrl, serverVariables: createInitialServerVariables(server) }));
+                }}
+              >
                 {getServerOptions(operation).map((server) => (
                   <option key={server.url} value={server.url}>
                     {server.description ? `${server.url} - ${server.description}` : server.url}
@@ -1146,6 +1183,8 @@ function TryItOut({
                         contentType,
                         bodyFormat: isJsonContentType(contentType) ? 'json' : 'text',
                         bodyText: formatInitialBody(operation, contentType),
+                        multipartFields: createInitialMultipartFields(operation, contentType),
+                        multipartFiles: {},
                       };
                     })
                   }
@@ -1157,6 +1196,34 @@ function TryItOut({
                   ))}
                 </select>
               </label>
+            ) : null}
+            {selectedServer?.variables ? (
+              <fieldset>
+                <legend>Server variables</legend>
+                {Object.entries(selectedServer.variables).map(([name, variable]) => (
+                  <label key={name}>
+                    {name}
+                    {variable.enum?.length ? (
+                      <select
+                        value={state.serverVariables[name] ?? String(variable.default ?? '')}
+                        onChange={(event) => setState((current) => ({ ...current, serverVariables: { ...current.serverVariables, [name]: event.currentTarget.value } }))}
+                      >
+                        {variable.enum.map((value) => (
+                          <option key={String(value)} value={String(value)}>
+                            {String(value)}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        value={state.serverVariables[name] ?? String(variable.default ?? '')}
+                        onChange={(event) => setState((current) => ({ ...current, serverVariables: { ...current.serverVariables, [name]: event.currentTarget.value } }))}
+                      />
+                    )}
+                    {variable.description ? <MarkdownText value={variable.description} /> : null}
+                  </label>
+                ))}
+              </fieldset>
             ) : null}
           </fieldset>
 
@@ -1172,7 +1239,7 @@ function TryItOut({
                     onChange={(event) => updateParameter(parameter.name, event.currentTarget.value)}
                     aria-describedby={parameter.description ? `${toDomId(operation.id)}-${toDomId(parameter.name)}-description` : undefined}
                   />
-                  {parameter.description ? <span id={`${toDomId(operation.id)}-${toDomId(parameter.name)}-description`}>{parameter.description}</span> : null}
+                  {parameter.description ? <span id={`${toDomId(operation.id)}-${toDomId(parameter.name)}-description`}><MarkdownText value={parameter.description} /></span> : null}
                 </label>
               ))
             ) : (
@@ -1180,7 +1247,25 @@ function TryItOut({
             )}
           </fieldset>
 
-          {state.contentType ? (
+          {state.contentType && isJsonContentType(state.contentType) && isSchemaObject(requestBodySchema) ? (
+            <SchemaBodyFields
+              schema={requestBodySchema}
+              bodyText={state.bodyText}
+              onChange={(bodyText) => setState((current) => ({ ...current, bodyText }))}
+            />
+          ) : null}
+
+          {state.contentType && isMultipartContentType(state.contentType) ? (
+            <MultipartBodyFields
+              fields={state.multipartFields}
+              files={state.multipartFiles}
+              onFieldChange={(name, value) => setState((current) => ({ ...current, multipartFields: { ...current.multipartFields, [name]: value } }))}
+              onFileChange={(name, file) => setState((current) => ({ ...current, multipartFiles: { ...current.multipartFiles, [name]: file } }))}
+              schema={requestBodySchema}
+            />
+          ) : null}
+
+          {state.contentType && !isMultipartContentType(state.contentType) ? (
             <label>
               Request body
               <textarea
@@ -1193,9 +1278,20 @@ function TryItOut({
 
           <GeneratedRequest
             request={request}
+            bodyLabel={isMultipartContentType(state.contentType) ? 'Multipart form data.' : undefined}
             snippetLanguage={state.snippetLanguage}
             onSnippetLanguageChange={(snippetLanguage) => setState((current) => ({ ...current, snippetLanguage }))}
           />
+          {validationMessages.length || state.validationMessages.length ? (
+            <div role="alert">
+              <h5>Validation</h5>
+              <ul>
+                {(state.validationMessages.length ? state.validationMessages : validationMessages).map((message) => (
+                  <li key={message}>{message}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
           <div>
             <button type="button" onClick={sendRequest} disabled={state.isSending}>
               {state.isSending ? 'Sending...' : 'Send request'}
@@ -1214,11 +1310,120 @@ function TryItOut({
   );
 }
 
+function SchemaBodyFields({ bodyText, onChange, schema }: { bodyText: string; onChange: (bodyText: string) => void; schema: SchemaObject }) {
+  const bodyValue = parseEditableObject(bodyText);
+  const properties = Object.entries(schema.properties ?? {});
+
+  if (!properties.length) {
+    return null;
+  }
+
+  const updateProperty = (name: string, value: unknown) => {
+    onChange(JSON.stringify({ ...bodyValue, [name]: value }, null, 2));
+  };
+
+  return (
+    <fieldset>
+      <legend>JSON body fields</legend>
+      {properties.map(([name, property]) => {
+        const propertySchema = isSchemaObject(property) ? property : undefined;
+        const value = bodyValue[name] ?? propertySchema?.default ?? '';
+
+        return (
+          <label key={name}>
+            {name}{schema.required?.includes(name) ? ' required' : ''}
+            <SchemaInput schema={propertySchema} value={value} onChange={(nextValue) => updateProperty(name, nextValue)} />
+            {propertySchema?.description ? <MarkdownText value={propertySchema.description} /> : null}
+          </label>
+        );
+      })}
+    </fieldset>
+  );
+}
+
+function SchemaInput({ onChange, schema, value }: { onChange: (value: unknown) => void; schema?: SchemaObject; value: unknown }) {
+  const type = getSchemaInputType(schema);
+
+  if (schema?.enum?.length) {
+    return (
+      <select value={String(value ?? '')} onChange={(event) => onChange(coerceSchemaValue(event.currentTarget.value, schema))}>
+        <option value="">Select value</option>
+        {schema.enum.map((item) => (
+          <option key={String(item)} value={String(item)}>
+            {String(item)}
+          </option>
+        ))}
+      </select>
+    );
+  }
+
+  if (type === 'boolean') {
+    return <input type="checkbox" checked={Boolean(value)} onChange={(event) => onChange(event.currentTarget.checked)} />;
+  }
+
+  if (type === 'array' || type === 'object') {
+    return <textarea rows={3} value={typeof value === 'string' ? value : JSON.stringify(value ?? (type === 'array' ? [] : {}), null, 2)} onChange={(event) => onChange(parseEditableValue(event.currentTarget.value))} />;
+  }
+
+  return (
+    <input
+      type={type === 'number' || type === 'integer' ? 'number' : schema?.format === 'date' ? 'date' : schema?.format === 'date-time' ? 'datetime-local' : 'text'}
+      value={String(value ?? '')}
+      onChange={(event) => onChange(coerceSchemaValue(event.currentTarget.value, schema))}
+    />
+  );
+}
+
+function MultipartBodyFields({
+  fields,
+  files,
+  onFieldChange,
+  onFileChange,
+  schema,
+}: {
+  fields: Record<string, string>;
+  files: Record<string, File | undefined>;
+  onFieldChange: (name: string, value: string) => void;
+  onFileChange: (name: string, file: File | undefined) => void;
+  schema: unknown;
+}) {
+  const properties = isSchemaObject(schema) ? Object.entries(schema.properties ?? {}) : [];
+
+  return (
+    <fieldset>
+      <legend>Multipart form data</legend>
+      {properties.length ? (
+        properties.map(([name, property]) => {
+          const propertySchema = isSchemaObject(property) ? property : undefined;
+          const isFile = propertySchema?.format === 'binary' || propertySchema?.format === 'base64';
+
+          return (
+            <label key={name}>
+              {name}
+              {isFile ? (
+                <input type="file" onChange={(event) => onFileChange(name, event.currentTarget.files?.[0])} />
+              ) : (
+                <input value={fields[name] ?? ''} onChange={(event) => onFieldChange(name, event.currentTarget.value)} />
+              )}
+              {files[name] ? <span>{files[name]?.name}</span> : null}
+              {propertySchema?.description ? <MarkdownText value={propertySchema.description} /> : null}
+            </label>
+          );
+        })
+      ) : (
+        <p>No multipart fields documented.</p>
+      )}
+    </fieldset>
+  );
+}
+
 function GeneratedRequest({
+  bodyLabel,
   onSnippetLanguageChange,
   request,
   snippetLanguage,
 }: {
+  bodyLabel?: string;
   onSnippetLanguageChange: (language: SnippetLanguage) => void;
   request: TryItOutRequest;
   snippetLanguage: SnippetLanguage;
@@ -1245,7 +1450,9 @@ function GeneratedRequest({
         <div>
           <dt>Body</dt>
           <dd>
-            {request.body === undefined ? (
+            {bodyLabel ? (
+              bodyLabel
+            ) : request.body === undefined ? (
               'No body.'
             ) : (
               <>
@@ -1392,6 +1599,67 @@ function UnknownValue({ value }: { value: unknown }) {
   return <pre>{JSON.stringify(value, null, 2)}</pre>;
 }
 
+function MarkdownText({ value }: { value: string }) {
+  return (
+    <>
+      {value.split(/\n{2,}/).map((paragraph, index) => (
+        <p key={index}>
+          {renderMarkdownInline(paragraph).map((part, partIndex) =>
+            part.kind === 'code' ? (
+              <code key={partIndex}>{part.value}</code>
+            ) : part.kind === 'strong' ? (
+              <strong key={partIndex}>{part.value}</strong>
+            ) : part.kind === 'em' ? (
+              <em key={partIndex}>{part.value}</em>
+            ) : part.kind === 'link' ? (
+              <ExternalLink key={partIndex} href={part.href}>
+                {part.value}
+              </ExternalLink>
+            ) : (
+              <span key={partIndex}>{part.value}</span>
+            ),
+          )}
+        </p>
+      ))}
+    </>
+  );
+}
+
+type MarkdownPart =
+  | { kind: 'text' | 'code' | 'strong' | 'em'; value: string }
+  | { kind: 'link'; value: string; href: string };
+
+function renderMarkdownInline(value: string): MarkdownPart[] {
+  const parts: MarkdownPart[] = [];
+  const pattern = /(`([^`]+)`)|(\*\*([^*]+)\*\*)|(\*([^*]+)\*)|(\[([^\]]+)\]\((https?:\/\/[^)\s]+)\))/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(value))) {
+    if (match.index > lastIndex) {
+      parts.push({ kind: 'text', value: value.slice(lastIndex, match.index) });
+    }
+
+    if (match[2]) {
+      parts.push({ kind: 'code', value: match[2] });
+    } else if (match[4]) {
+      parts.push({ kind: 'strong', value: match[4] });
+    } else if (match[6]) {
+      parts.push({ kind: 'em', value: match[6] });
+    } else if (match[8] && match[9]) {
+      parts.push({ kind: 'link', value: match[8], href: match[9] });
+    }
+
+    lastIndex = pattern.lastIndex;
+  }
+
+  if (lastIndex < value.length) {
+    parts.push({ kind: 'text', value: value.slice(lastIndex) });
+  }
+
+  return parts.length ? parts : [{ kind: 'text', value }];
+}
+
 function ExternalDocsLink({ docs }: { docs: ExternalDocumentationObject }) {
   return <ExternalLink href={docs.url}>{docs.description ?? docs.url}</ExternalLink>;
 }
@@ -1479,6 +1747,7 @@ function createTryItOutState(operation: NormalizedOperation): TryItOutState {
   return {
     enabled: false,
     serverUrl: getServerOptions(operation)[0]?.url ?? '',
+    serverVariables: createInitialServerVariables(getServerOptions(operation)[0]),
     contentType,
     parameters: Object.fromEntries(
       operation.parameters
@@ -1487,7 +1756,10 @@ function createTryItOutState(operation: NormalizedOperation): TryItOutState {
     ),
     bodyText: formatInitialBody(operation, contentType),
     bodyFormat: isJsonContentType(contentType) ? 'json' : 'text',
+    multipartFields: createInitialMultipartFields(operation, contentType),
+    multipartFiles: {},
     snippetLanguage: 'curl',
+    validationMessages: [],
     isSending: false,
   };
 }
@@ -1507,11 +1779,30 @@ function buildTryItOutRequestForState({
     document,
     operation,
     serverUrl: state.serverUrl,
+    serverVariables: state.serverVariables,
     parameters: parseParameters(state.parameters),
-    body: state.contentType ? parseBody(state.bodyText, state.bodyFormat) : undefined,
+    body: state.contentType ? (isMultipartContentType(state.contentType) ? state.multipartFields : parseBody(state.bodyText, state.bodyFormat)) : undefined,
     contentType: state.contentType || undefined,
     auth: authCredentials,
+    securitySchemes: getTryItOutSecuritySchemes(document),
   });
+}
+
+function createInitialServerVariables(server: ServerObject | undefined): Record<string, string> {
+  return Object.fromEntries(Object.entries(server?.variables ?? {}).map(([name, variable]) => [name, String(variable.default ?? '')]));
+}
+
+function createInitialMultipartFields(operation: NormalizedOperation, contentType: string): Record<string, string> {
+  const schema = getRequestBodyMediaTypes(operation)[contentType]?.schema;
+  if (!isSchemaObject(schema)) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(schema.properties ?? {})
+      .filter((entry) => isSchemaObject(entry[1]) && entry[1].format !== 'binary' && entry[1].format !== 'base64')
+      .map(([name, property]) => [name, formatInitialSchemaValue(property)]),
+  );
 }
 
 function parseParameters(parameters: Record<string, string>): Record<string, SerializableParameterValue | undefined> {
@@ -1544,6 +1835,11 @@ function parseBody(value: string, format: TryItOutState['bodyFormat']): unknown 
   return value;
 }
 
+function parseEditableObject(value: string): Record<string, unknown> {
+  const parsed = parseBody(value, 'json');
+  return isRecord(parsed) ? parsed : {};
+}
+
 function formatParameterInitialValue(parameter: ParameterObject) {
   if ('example' in parameter && parameter.example !== undefined) {
     return typeof parameter.example === 'string' ? parameter.example : JSON.stringify(parameter.example, null, 2);
@@ -1561,6 +1857,97 @@ function formatInitialBody(operation: NormalizedOperation, contentType: string) 
   }
 
   return typeof example === 'string' ? example : JSON.stringify(example, null, 2);
+}
+
+function formatInitialSchemaValue(schema: SchemaObject | ReferenceObject) {
+  if (!isSchemaObject(schema)) {
+    return '';
+  }
+
+  if (schema.default !== undefined) {
+    return String(schema.default);
+  }
+
+  if (schema.example !== undefined) {
+    return typeof schema.example === 'string' ? schema.example : JSON.stringify(schema.example);
+  }
+
+  return '';
+}
+
+function validateTryItOutState(operation: NormalizedOperation, state: TryItOutState): string[] {
+  const messages: string[] = [];
+
+  for (const parameter of operation.parameters) {
+    if (!isReferenceObject(parameter) && parameter.required && !state.parameters[parameter.name]?.trim()) {
+      messages.push(`${parameter.in} parameter "${parameter.name}" is required.`);
+    }
+  }
+
+  if (isRequestBodyObject(operation.requestBody) && operation.requestBody.required && state.contentType) {
+    if (isMultipartContentType(state.contentType)) {
+      const schema = getRequestBodyMediaTypes(operation)[state.contentType]?.schema;
+      if (isSchemaObject(schema)) {
+        for (const name of schema.required ?? []) {
+          const property = schema.properties?.[name];
+          const isFile = isSchemaObject(property) && (property.format === 'binary' || property.format === 'base64');
+          if (isFile ? !state.multipartFiles[name] : !state.multipartFields[name]?.trim()) {
+            messages.push(`Multipart field "${name}" is required.`);
+          }
+        }
+      }
+    } else if (!state.bodyText.trim()) {
+      messages.push('Request body is required.');
+    }
+  }
+
+  if (state.bodyFormat === 'json' && state.bodyText.trim()) {
+    try {
+      JSON.parse(state.bodyText);
+    } catch {
+      messages.push('Request body must be valid JSON.');
+    }
+  }
+
+  return messages;
+}
+
+function buildMultipartFormData(state: TryItOutState) {
+  const data = new FormData();
+  for (const [name, value] of Object.entries(state.multipartFields)) {
+    if (value !== '') {
+      data.append(name, value);
+    }
+  }
+  for (const [name, file] of Object.entries(state.multipartFiles)) {
+    if (file) {
+      data.append(name, file);
+    }
+  }
+  return data;
+}
+
+function getHeadersWithoutContentType(headers: Record<string, string>) {
+  return Object.fromEntries(Object.entries(headers).filter(([name]) => name.toLowerCase() !== 'content-type'));
+}
+
+function getSchemaInputType(schema: SchemaObject | undefined) {
+  const type = Array.isArray(schema?.type) ? schema.type[0] : schema?.type;
+  return type ?? 'string';
+}
+
+function coerceSchemaValue(value: string, schema: SchemaObject | undefined) {
+  const type = getSchemaInputType(schema);
+  if (value === '') {
+    return '';
+  }
+  if (type === 'integer') {
+    return Number.parseInt(value, 10);
+  }
+  if (type === 'number') {
+    return Number.parseFloat(value);
+  }
+  return value;
 }
 
 function getRequestBodyContentTypes(operation: NormalizedOperation) {
@@ -1588,6 +1975,15 @@ function getSupportedSecuritySchemes(document: OpenAPIObject): Record<string, Se
   return Object.fromEntries(supportedEntries);
 }
 
+function getTryItOutSecuritySchemes(document: OpenAPIObject): Record<string, SecuritySchemeObject | ReferenceObject | unknown> {
+  return Object.fromEntries(
+    Object.entries(getSecuritySchemes(document)).map(([name, scheme]) => [
+      name,
+      isSecuritySchemeObject(scheme) && (scheme.type === 'oauth2' || scheme.type === 'openIdConnect') ? { ...scheme, type: 'http', scheme: 'bearer' } : scheme,
+    ]),
+  );
+}
+
 function isSupportedSecurityScheme(value: unknown): value is SecuritySchemeObject {
   if (!value || typeof value !== 'object' || isReferenceObject(value) || !('type' in value)) {
     return false;
@@ -1598,8 +1994,14 @@ function isSupportedSecurityScheme(value: unknown): value is SecuritySchemeObjec
 
   return (
     (scheme.type === 'http' && (httpScheme === 'basic' || httpScheme === 'bearer')) ||
-    (scheme.type === 'apiKey' && Boolean(scheme.name) && (scheme.in === 'header' || scheme.in === 'query' || scheme.in === 'cookie'))
+    (scheme.type === 'apiKey' && Boolean(scheme.name) && (scheme.in === 'header' || scheme.in === 'query' || scheme.in === 'cookie')) ||
+    scheme.type === 'oauth2' ||
+    scheme.type === 'openIdConnect'
   );
+}
+
+function isSecuritySchemeObject(value: unknown): value is SecuritySchemeObject {
+  return value !== null && typeof value === 'object' && !isReferenceObject(value) && 'type' in value;
 }
 
 function getSecuritySchemeLabel(scheme: SecuritySchemeObject) {
@@ -1617,7 +2019,26 @@ function getSecuritySchemeLabel(scheme: SecuritySchemeObject) {
     return `api key in ${scheme.in}`;
   }
 
+  if (scheme.type === 'oauth2') {
+    return 'OAuth 2.0 access token';
+  }
+
+  if (scheme.type === 'openIdConnect') {
+    return 'OpenID Connect access token';
+  }
+
   return scheme.type;
+}
+
+function getSecuritySchemeMetadata(scheme: SecuritySchemeObject): Array<[string, unknown]> {
+  const entries: Array<[string, unknown]> = [];
+  if (scheme.openIdConnectUrl) {
+    entries.push(['OpenID Connect URL', scheme.openIdConnectUrl]);
+  }
+  if (scheme.flows) {
+    entries.push(['OAuth flows', scheme.flows]);
+  }
+  return entries;
 }
 
 function isEmptyCredential(credential: SecurityCredential | undefined) {
@@ -1683,12 +2104,24 @@ function isRequestBodyObject(value: unknown): value is RequestBodyObject {
   return Boolean(value) && typeof value === 'object' && !isReferenceObject(value);
 }
 
+function isSchemaObject(value: unknown): value is SchemaObject {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value) && !isReferenceObject(value);
+}
+
 function isReferenceObject(value: unknown): value is ReferenceObject {
   return value !== null && typeof value === 'object' && '$ref' in value;
 }
 
 function isJsonContentType(contentType: string) {
   return contentType.toLowerCase().includes('json');
+}
+
+function isMultipartContentType(contentType: string) {
+  return contentType.toLowerCase().includes('multipart/form-data');
+}
+
+function mergeCredentials(...credentials: Array<TryItOutAuthCredentials | undefined>): TryItOutAuthCredentials {
+  return Object.assign({}, ...credentials);
 }
 
 function toDomId(value: string) {
