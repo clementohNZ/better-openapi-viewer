@@ -19,6 +19,7 @@ export type OpenAPIObject = {
   paths?: Record<string, PathItemObject | undefined>;
   components?: ComponentsObject | unknown;
   definitions?: Record<string, unknown>;
+  securityDefinitions?: Record<string, SecuritySchemeObject | ReferenceObject | unknown>;
   tags?: Array<TagObject>;
   security?: SecurityRequirementObject[];
   webhooks?: Record<string, PathItemObject | undefined>;
@@ -75,6 +76,8 @@ export type OperationObject = {
   security?: SecurityRequirementObject[];
   servers?: ServerObject[];
   callbacks?: Record<string, unknown>;
+  consumes?: string[];
+  produces?: string[];
 };
 
 export type ParameterObject = {
@@ -286,6 +289,52 @@ export type TryItOutRequest = {
   headers: Record<string, string>;
   cookies: Record<string, string>;
   body?: string;
+};
+
+export type ResponseStatusRange = '1xx' | '2xx' | '3xx' | '4xx' | '5xx' | 'default' | 'unknown';
+
+export type ResponseCategory = 'informational' | 'success' | 'redirect' | 'client-error' | 'server-error' | 'default' | 'unknown';
+
+export type NormalizedResponse = {
+  statusCode: string;
+  statusRange: ResponseStatusRange;
+  category: ResponseCategory;
+  description?: string;
+  contentTypes: string[];
+  headers: Record<string, unknown>;
+  links: Record<string, unknown>;
+  schema?: SchemaObject | ReferenceObject | unknown;
+  example?: unknown;
+  raw: ResponseObject | ReferenceObject | unknown;
+};
+
+export type SchemaTreeNodeKind = 'schema' | 'property' | 'array-item' | 'additional-properties' | 'composition' | 'reference';
+
+export type SchemaTreeNode = {
+  id: string;
+  name: string;
+  path: string;
+  kind: SchemaTreeNodeKind;
+  type?: string;
+  format?: string;
+  description?: string;
+  required: boolean;
+  nullable: boolean;
+  deprecated: boolean;
+  readOnly: boolean;
+  writeOnly: boolean;
+  ref?: string;
+  enumValues?: unknown[];
+  example?: unknown;
+  children: SchemaTreeNode[];
+  schema: SchemaObject | ReferenceObject | unknown;
+};
+
+export type SchemaTreeOptions = {
+  name?: string;
+  path?: string;
+  required?: boolean;
+  maxDepth?: number;
 };
 
 const HTTP_METHODS: HttpMethod[] = ['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace'];
@@ -530,6 +579,112 @@ export function getResponseExample(response: ResponseObject | ReferenceObject | 
   return getMediaTypeExample(mediaType);
 }
 
+export function classifyResponseStatus(statusCode: string | number): { statusRange: ResponseStatusRange; category: ResponseCategory } {
+  const status = String(statusCode).toLowerCase();
+
+  if (status === 'default') {
+    return { statusRange: 'default', category: 'default' };
+  }
+
+  const firstDigit = status.match(/^[1-5]/)?.[0];
+  if (!firstDigit) {
+    return { statusRange: 'unknown', category: 'unknown' };
+  }
+
+  const statusRange = `${firstDigit}xx` as Exclude<ResponseStatusRange, 'default' | 'unknown'>;
+  const categories: Record<Exclude<ResponseStatusRange, 'default' | 'unknown'>, ResponseCategory> = {
+    '1xx': 'informational',
+    '2xx': 'success',
+    '3xx': 'redirect',
+    '4xx': 'client-error',
+    '5xx': 'server-error',
+  };
+
+  return { statusRange, category: categories[statusRange] };
+}
+
+export function normalizeResponses(
+  responses: Record<string, ResponseObject | ReferenceObject | unknown> = {},
+  options: { produces?: string[] } = {},
+): NormalizedResponse[] {
+  return Object.entries(responses)
+    .map(([statusCode, response]) => normalizeResponse(statusCode, response, options))
+    .sort((left, right) => getResponseSortValue(left.statusCode) - getResponseSortValue(right.statusCode));
+}
+
+export function normalizeResponse(
+  statusCode: string | number,
+  response: ResponseObject | ReferenceObject | unknown,
+  options: { produces?: string[] } = {},
+): NormalizedResponse {
+  const classification = classifyResponseStatus(statusCode);
+  const normalized: NormalizedResponse = {
+    statusCode: String(statusCode),
+    ...classification,
+    contentTypes: [],
+    headers: {},
+    links: {},
+    raw: response,
+  };
+
+  if (!isObject(response) || isReferenceObject(response)) {
+    return normalized;
+  }
+
+  const content = isObject(response.content) ? (response.content as Record<string, MediaTypeObject>) : undefined;
+  const swaggerSchema = response.schema;
+  const contentTypes = content ? Object.keys(content) : swaggerSchema ? (options.produces?.length ? options.produces : ['application/json']) : [];
+
+  return {
+    ...normalized,
+    description: typeof response.description === 'string' ? response.description : undefined,
+    contentTypes,
+    headers: isObject(response.headers) ? response.headers : {},
+    links: isObject(response.links) ? response.links : {},
+    schema: content ? Object.values(content).find(Boolean)?.schema : swaggerSchema,
+    example: getResponseExample(response, contentTypes[0]),
+  };
+}
+
+export function getRequestBodyMediaTypes(
+  operation: Pick<OperationObject, 'requestBody' | 'parameters' | 'consumes'>,
+  document: Pick<OpenAPIObject, 'consumes'> = {},
+): string[] {
+  const mediaTypes = new Set<string>();
+
+  if (isObject(operation.requestBody) && !isReferenceObject(operation.requestBody) && isObject(operation.requestBody.content)) {
+    for (const mediaType of Object.keys(operation.requestBody.content)) {
+      mediaTypes.add(mediaType);
+    }
+  }
+
+  const hasSwaggerBody = operation.parameters?.some((parameter) => !isReferenceObject(parameter) && (parameter.in === 'body' || parameter.in === 'formData'));
+  if (hasSwaggerBody) {
+    for (const mediaType of operation.consumes ?? document.consumes ?? ['application/json']) {
+      mediaTypes.add(mediaType);
+    }
+  }
+
+  return [...mediaTypes];
+}
+
+export function getSecuritySchemes(document: Pick<OpenAPIObject, 'components' | 'securityDefinitions'> | undefined): Record<string, SecuritySchemeObject | ReferenceObject | unknown> {
+  const openApiSchemes = isObject(document?.components) && isObject(document.components.securitySchemes) ? document.components.securitySchemes : {};
+  const swaggerSchemes = isObject(document?.securityDefinitions) ? document.securityDefinitions : {};
+  return { ...swaggerSchemes, ...openApiSchemes };
+}
+
+export function getSchemaTree(schema: SchemaObject | ReferenceObject | unknown, options: SchemaTreeOptions = {}): SchemaTreeNode {
+  return buildSchemaTreeNode(schema, {
+    name: options.name ?? 'schema',
+    path: options.path ?? '$',
+    kind: 'schema',
+    required: Boolean(options.required),
+    depth: 0,
+    maxDepth: options.maxDepth ?? 8,
+  });
+}
+
 export function getSchemaType(schema: SchemaObject | ReferenceObject | unknown): string | undefined {
   if (!isObject(schema) || isReferenceObject(schema)) {
     return undefined;
@@ -556,6 +711,10 @@ export function getSchemaType(schema: SchemaObject | ReferenceObject | unknown):
   }
 
   return undefined;
+}
+
+export function escapeMarkdownText(value: string): string {
+  return value.replace(/([\\`*_{}[\]()#+\-.!|>])/g, '\\$1');
 }
 
 export function selectServerUrl(
@@ -866,8 +1025,7 @@ function isSecuritySchemeObject(value: unknown): value is SecuritySchemeObject {
 }
 
 function getDocumentSecuritySchemes(document: OpenAPIObject | undefined): Record<string, SecuritySchemeObject | ReferenceObject | unknown> {
-  const securitySchemes = isObject(document?.components) ? document.components.securitySchemes : undefined;
-  return isObject(securitySchemes) ? securitySchemes : {};
+  return getSecuritySchemes(document);
 }
 
 function encodeBase64(value: string) {
@@ -920,6 +1078,15 @@ function getParameterNames(parameters: Array<ParameterObject | ReferenceObject>)
   return parameters.map((parameter) => (isReferenceObject(parameter) ? getRefName(parameter.$ref) : parameter.name)).filter(Boolean);
 }
 
+function getResponseSortValue(statusCode: string) {
+  if (statusCode.toLowerCase() === 'default') {
+    return 1000;
+  }
+
+  const parsed = Number.parseInt(statusCode, 10);
+  return Number.isFinite(parsed) ? parsed : 1001;
+}
+
 function getOperationServers(document: OpenAPIObject, pathItem: PathItemObject, operation: OperationObject) {
   if (operation.servers) {
     return operation.servers;
@@ -946,13 +1113,7 @@ function getOperationServers(document: OpenAPIObject, pathItem: PathItemObject, 
 function getOperationContentTypes(operation: OperationObject, document: OpenAPIObject) {
   const contentTypes = new Set<string>();
 
-  if (isObject(operation.requestBody) && !isReferenceObject(operation.requestBody) && isObject(operation.requestBody.content)) {
-    for (const contentType of Object.keys(operation.requestBody.content)) {
-      contentTypes.add(contentType);
-    }
-  }
-
-  for (const contentType of document.consumes ?? []) {
+  for (const contentType of getRequestBodyMediaTypes(operation, document)) {
     contentTypes.add(contentType);
   }
 
@@ -964,7 +1125,7 @@ function getOperationContentTypes(operation: OperationObject, document: OpenAPIO
     }
   }
 
-  for (const contentType of document.produces ?? []) {
+  for (const contentType of operation.produces ?? document.produces ?? []) {
     contentTypes.add(contentType);
   }
 
@@ -1102,6 +1263,96 @@ function buildSchemaExample(schema: unknown, depth: number, maxDepth: number, re
   }
 
   return '';
+}
+
+function buildSchemaTreeNode(
+  schema: unknown,
+  context: { name: string; path: string; kind: SchemaTreeNodeKind; required: boolean; depth: number; maxDepth: number },
+): SchemaTreeNode {
+  const ref = isReferenceObject(schema) ? schema.$ref : undefined;
+  const schemaObject = isObject(schema) && !isReferenceObject(schema) ? schema : {};
+  const requiredProperties = new Set(Array.isArray(schemaObject.required) ? schemaObject.required.filter((item): item is string => typeof item === 'string') : []);
+  const type = getSchemaType(schema);
+  const children: SchemaTreeNode[] = [];
+
+  if (context.depth < context.maxDepth && !ref) {
+    if (isObject(schemaObject.properties)) {
+      for (const [propertyName, propertySchema] of Object.entries(schemaObject.properties)) {
+        children.push(
+          buildSchemaTreeNode(propertySchema, {
+            name: propertyName,
+            path: `${context.path}.${propertyName}`,
+            kind: 'property',
+            required: requiredProperties.has(propertyName),
+            depth: context.depth + 1,
+            maxDepth: context.maxDepth,
+          }),
+        );
+      }
+    }
+
+    if (schemaObject.items) {
+      children.push(
+        buildSchemaTreeNode(schemaObject.items, {
+          name: 'items',
+          path: `${context.path}[]`,
+          kind: 'array-item',
+          required: true,
+          depth: context.depth + 1,
+          maxDepth: context.maxDepth,
+        }),
+      );
+    }
+
+    if (isObject(schemaObject.additionalProperties)) {
+      children.push(
+        buildSchemaTreeNode(schemaObject.additionalProperties, {
+          name: 'additionalProperties',
+          path: `${context.path}.*`,
+          kind: 'additional-properties',
+          required: false,
+          depth: context.depth + 1,
+          maxDepth: context.maxDepth,
+        }),
+      );
+    }
+
+    for (const key of ['allOf', 'oneOf', 'anyOf'] as const) {
+      const items = Array.isArray(schemaObject[key]) ? schemaObject[key] : [];
+      items.forEach((item, index) => {
+        children.push(
+          buildSchemaTreeNode(item, {
+            name: `${key}[${index}]`,
+            path: `${context.path}.${key}[${index}]`,
+            kind: 'composition',
+            required: context.required,
+            depth: context.depth + 1,
+            maxDepth: context.maxDepth,
+          }),
+        );
+      });
+    }
+  }
+
+  return {
+    id: context.path,
+    name: context.name,
+    path: context.path,
+    kind: ref ? 'reference' : context.kind,
+    type,
+    format: typeof schemaObject.format === 'string' ? schemaObject.format : undefined,
+    description: typeof schemaObject.description === 'string' ? schemaObject.description : undefined,
+    required: context.required,
+    nullable: Boolean(schemaObject.nullable) || (Array.isArray(schemaObject.type) && schemaObject.type.includes('null')),
+    deprecated: Boolean(schemaObject.deprecated),
+    readOnly: Boolean(schemaObject.readOnly),
+    writeOnly: Boolean(schemaObject.writeOnly),
+    ref,
+    enumValues: Array.isArray(schemaObject.enum) ? schemaObject.enum : undefined,
+    example: getSchemaExample(schema),
+    children,
+    schema,
+  };
 }
 
 function resolveValue(value: unknown, root: unknown, stack: Set<string>, depth: number, maxDepth: number, preserveRefs: boolean): unknown {
