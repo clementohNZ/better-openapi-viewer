@@ -4,7 +4,9 @@ React UI for Better OpenAPI Viewer.
 
 ## Discovery
 
-The viewer renders accessible endpoint navigation with operation counts, text search, and filters for HTTP method, tag, auth requirement, deprecated status, and documented content types when those values are available from the normalized OpenAPI document.
+The viewer renders accessible endpoint navigation with operation counts, text search, and filters for HTTP method, tag, auth requirement, deprecated status, and documented content types when those values are available from the normalized OpenAPI document. It also renders component schemas and Swagger definitions in a Models section using the core schema tree helpers.
+
+Expanded operations show structured request body media types, schema property trees, documented examples, response status class labels, response descriptions, response content examples, external docs links, and callback/webhook summaries when present.
 
 ## Try It Out
 

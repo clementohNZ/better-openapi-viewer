@@ -6,16 +6,23 @@ import {
   getMediaTypeExample,
   getOperations,
   getSecuritySchemes,
+  getSchemaTree,
   groupOperationsByTag,
+  normalizeResponses,
   type BasicAuthCredentials,
+  type ExampleObject,
+  type ExternalDocumentationObject,
   type HttpMethod,
   type MediaTypeObject,
   type NormalizedOperation,
   type OpenAPIObject,
+  type OperationObject,
   type OperationFilter,
   type ParameterObject,
+  type PathItemObject,
   type ReferenceObject,
   type RequestBodyObject,
+  type SchemaTreeNode,
   type SerializableParameterValue,
   type SecurityCredential,
   type SecurityRequirementObject,
@@ -40,6 +47,7 @@ export function BetterOpenApiViewer({ document, persistAuthorization = false }: 
   const [expandedOperations, setExpandedOperations] = useState<Set<string>>(() => new Set());
   const operations = useMemo(() => getOperations(document), [document]);
   const securitySchemes = useMemo(() => getSupportedSecuritySchemes(document), [document]);
+  const componentSchemas = useMemo(() => getComponentSchemas(document), [document]);
   const [authCredentials, setAuthCredentials] = useState<TryItOutAuthCredentials>(() =>
     persistAuthorization ? readPersistedAuthCredentials(document) : {},
   );
@@ -127,6 +135,8 @@ export function BetterOpenApiViewer({ document, persistAuthorization = false }: 
         persistAuthorization={persistAuthorization}
         schemes={securitySchemes}
       />
+
+      <Models schemas={componentSchemas} />
 
       <section aria-labelledby="endpoint-navigation-heading">
         <h2 id="endpoint-navigation-heading">Endpoints</h2>
@@ -250,12 +260,13 @@ export function BetterOpenApiViewer({ document, persistAuthorization = false }: 
             Collapse all
           </button>
         </div>
-        {groupedOperations.map(({ name, description, operations: tagOperations }) => (
+        {groupedOperations.map(({ name, description, externalDocs, operations: tagOperations }) => (
           <section key={name} aria-labelledby={`tag-${toDomId(name)}`}>
             <h3 id={`tag-${toDomId(name)}`}>
               {name} ({tagOperations.length})
             </h3>
             {description ? <p>{description}</p> : null}
+            {externalDocs ? <ExternalDocsLink docs={externalDocs} /> : null}
 
             <ul>
               {tagOperations.map((operation) => {
@@ -279,10 +290,11 @@ export function BetterOpenApiViewer({ document, persistAuthorization = false }: 
 
                       {isExpanded ? (
                         <div id={`operation-details-${toDomId(operation.id)}`}>
-                          <OperationOverview operation={operation} />
+                          <OperationOverview document={document} operation={operation} />
                           <Parameters parameters={operation.parameters} />
-                          <UnknownObjectSection title="Request body" value={operation.requestBody} emptyMessage="No request body." />
-                          <UnknownRecordSection title="Responses" value={operation.responses} emptyMessage="No responses documented." />
+                          <RequestBody requestBody={operation.requestBody} />
+                          <Responses operation={operation} document={document} />
+                          <Callbacks operation={operation} document={document} />
                           <Security security={operation.security} schemes={securitySchemes} />
                           <Servers servers={operation.servers} />
                           <TryItOut authCredentials={authCredentials} operation={operation} document={document} />
@@ -341,7 +353,33 @@ function RadioFilter({
   );
 }
 
-function OperationOverview({ operation }: { operation: NormalizedOperation }) {
+function Models({ schemas }: { schemas: Record<string, unknown> }) {
+  const entries = Object.entries(schemas);
+
+  return (
+    <section aria-labelledby="models-heading">
+      <h2 id="models-heading">Models</h2>
+      {entries.length ? (
+        <ul>
+          {entries.map(([name, schema]) => (
+            <li key={name} id={`model-${toDomId(name)}`}>
+              <article>
+                <h3>{name}</h3>
+                <SchemaTree schema={schema} name={name} />
+              </article>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p>No component schemas documented.</p>
+      )}
+    </section>
+  );
+}
+
+function OperationOverview({ document, operation }: { document: OpenAPIObject; operation: NormalizedOperation }) {
+  const sourceOperation = getSourceOperation(document, operation);
+
   return (
     <section aria-labelledby={`${toDomId(operation.id)}-overview`}>
       <h4 id={`${toDomId(operation.id)}-overview`}>Overview</h4>
@@ -382,6 +420,26 @@ function OperationOverview({ operation }: { operation: NormalizedOperation }) {
           <dt>Status</dt>
           <dd>{operation.deprecated ? 'Deprecated' : 'Active'}</dd>
         </div>
+        {operation.externalDocs ? (
+          <div>
+            <dt>External docs</dt>
+            <dd>
+              <ExternalDocsLink docs={operation.externalDocs} />
+            </dd>
+          </div>
+        ) : null}
+        {sourceOperation?.callbacks ? (
+          <div>
+            <dt>Callbacks</dt>
+            <dd>{Object.keys(sourceOperation.callbacks).length}</dd>
+          </div>
+        ) : null}
+        {document.webhooks ? (
+          <div>
+            <dt>Webhooks</dt>
+            <dd>{Object.keys(document.webhooks).length}</dd>
+          </div>
+        ) : null}
       </dl>
     </section>
   );
@@ -427,6 +485,289 @@ function Parameters({ parameters }: { parameters: Array<ParameterObject | Refere
         <p>No parameters.</p>
       )}
     </section>
+  );
+}
+
+function RequestBody({ requestBody }: { requestBody: unknown }) {
+  if (!requestBody) {
+    return (
+      <section>
+        <h4>Request body</h4>
+        <p>No request body.</p>
+      </section>
+    );
+  }
+
+  if (isReferenceObject(requestBody)) {
+    return (
+      <section>
+        <h4>Request body</h4>
+        <p>
+          Reference: <code>{requestBody.$ref}</code>
+        </p>
+      </section>
+    );
+  }
+
+  if (!isRequestBodyObject(requestBody)) {
+    return <UnknownObjectSection title="Request body" value={requestBody} emptyMessage="No request body." />;
+  }
+
+  const mediaEntries = Object.entries(requestBody.content ?? {});
+
+  return (
+    <section>
+      <h4>Request body</h4>
+      {requestBody.description ? <p>{requestBody.description}</p> : null}
+      <p>{requestBody.required ? 'Required.' : 'Optional.'}</p>
+      {mediaEntries.length ? (
+        <ul>
+          {mediaEntries.map(([contentType, mediaType]) => (
+            <li key={contentType}>
+              <article>
+                <h5>
+                  <code>{contentType}</code>
+                </h5>
+                <MediaTypeDetails mediaType={mediaType} schemaName="body" />
+              </article>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p>No media types documented.</p>
+      )}
+    </section>
+  );
+}
+
+function Responses({ operation, document }: { operation: NormalizedOperation; document: OpenAPIObject }) {
+  const responses = normalizeResponses(operation.responses, { produces: getOperationProduces(document, operation) });
+
+  return (
+    <section>
+      <h4>Responses</h4>
+      {responses.length ? (
+        <ul>
+          {responses.map((response) => (
+            <li key={response.statusCode}>
+              <article>
+                <h5>
+                  <code>{response.statusCode}</code> {getResponseStatusLabel(response.statusRange, response.category)}
+                </h5>
+                {response.description ? <p>{response.description}</p> : null}
+                {response.contentTypes.length ? (
+                  <ul>
+                    {response.contentTypes.map((contentType) => (
+                      <li key={contentType}>
+                        <code>{contentType}</code>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+                {response.schema ? <SchemaTree schema={response.schema} name={`${response.statusCode} response`} /> : null}
+                {response.example !== undefined ? (
+                  <details>
+                    <summary>Example</summary>
+                    <UnknownValue value={response.example} />
+                  </details>
+                ) : null}
+                {Object.keys(response.headers).length ? <UnknownRecordSection title="Headers" value={response.headers} emptyMessage="No headers." /> : null}
+                {Object.keys(response.links).length ? <UnknownRecordSection title="Links" value={response.links} emptyMessage="No links." /> : null}
+              </article>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p>No responses documented.</p>
+      )}
+    </section>
+  );
+}
+
+function MediaTypeDetails({ mediaType, schemaName }: { mediaType: MediaTypeObject; schemaName: string }) {
+  const example = getMediaTypeExample(mediaType);
+
+  return (
+    <div>
+      {mediaType.schema ? <SchemaTree schema={mediaType.schema} name={schemaName} /> : null}
+      {example !== undefined ? (
+        <details>
+          <summary>Example</summary>
+          <UnknownValue value={example} />
+        </details>
+      ) : null}
+      {Object.keys(mediaType.examples ?? {}).length ? <Examples examples={mediaType.examples ?? {}} /> : null}
+      {Object.keys(mediaType.encoding ?? {}).length ? <UnknownRecordSection title="Encoding" value={mediaType.encoding ?? {}} emptyMessage="No encoding." /> : null}
+    </div>
+  );
+}
+
+function Examples({ examples }: { examples: Record<string, ExampleObject | ReferenceObject | unknown> }) {
+  return (
+    <details>
+      <summary>Examples</summary>
+      <dl>
+        {Object.entries(examples).map(([name, example]) => (
+          <div key={name}>
+            <dt>
+              <code>{name}</code>
+            </dt>
+            <dd>
+              <ExampleValue example={example} />
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </details>
+  );
+}
+
+function ExampleValue({ example }: { example: ExampleObject | ReferenceObject | unknown }) {
+  if (isReferenceObject(example)) {
+    return <code>{example.$ref}</code>;
+  }
+
+  if (isExampleObject(example)) {
+    return (
+      <div>
+        {example.summary ? <p>{example.summary}</p> : null}
+        {example.description ? <p>{example.description}</p> : null}
+        {example.externalValue ? <ExternalLink href={example.externalValue}>{example.externalValue}</ExternalLink> : null}
+        {example.value !== undefined ? <UnknownValue value={example.value} /> : null}
+      </div>
+    );
+  }
+
+  return <UnknownValue value={example} />;
+}
+
+function SchemaTree({ schema, name }: { schema: unknown; name: string }) {
+  return <SchemaTreeNodeView node={getSchemaTree(schema, { name })} />;
+}
+
+function SchemaTreeNodeView({ node }: { node: SchemaTreeNode }) {
+  return (
+    <details open={node.kind === 'schema'}>
+      <summary>
+        <code>{node.name}</code> {node.type ? <span>{node.type}</span> : null}
+        {node.format ? <span> ({node.format})</span> : null}
+        {node.required ? <strong> required</strong> : null}
+        {node.deprecated ? <strong> deprecated</strong> : null}
+        {node.readOnly ? <span> readOnly</span> : null}
+        {node.writeOnly ? <span> writeOnly</span> : null}
+        {node.ref ? (
+          <span>
+            {' '}
+            reference <code>{node.ref}</code>
+          </span>
+        ) : null}
+      </summary>
+      {node.description ? <p>{node.description}</p> : null}
+      {node.enumValues?.length ? (
+        <p>
+          Enum: <code>{node.enumValues.map((value) => JSON.stringify(value)).join(', ')}</code>
+        </p>
+      ) : null}
+      {node.example !== undefined && !node.children.length ? (
+        <details>
+          <summary>Example</summary>
+          <UnknownValue value={node.example} />
+        </details>
+      ) : null}
+      {node.children.length ? (
+        <ul>
+          {node.children.map((child) => (
+            <li key={child.id}>
+              <SchemaTreeNodeView node={child} />
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </details>
+  );
+}
+
+function Callbacks({ operation, document }: { operation: NormalizedOperation; document: OpenAPIObject }) {
+  const sourceOperation = getSourceOperation(document, operation);
+  const callbacks = Object.entries(sourceOperation?.callbacks ?? {});
+  const webhooks = Object.entries(document.webhooks ?? {});
+
+  if (!callbacks.length && !webhooks.length) {
+    return null;
+  }
+
+  return (
+    <section>
+      <h4>Callbacks and webhooks</h4>
+      {callbacks.length ? <CallbackSummaryList entries={callbacks} /> : null}
+      {webhooks.length ? <PathItemSummaryList title="Webhooks" entries={webhooks} /> : null}
+    </section>
+  );
+}
+
+function CallbackSummaryList({ entries }: { entries: Array<[string, unknown]> }) {
+  return (
+    <section>
+      <h5>Callbacks</h5>
+      <ul>
+        {entries.map(([name, callback]) => (
+          <li key={name}>
+            <code>{name}</code>
+            {isRecord(callback) ? (
+              <ul>
+                {Object.entries(callback).map(([expression, pathItem]) => (
+                  <li key={expression}>
+                    <code>{expression}</code>
+                    {isPathItemObject(pathItem) ? <PathItemSummary pathItem={pathItem} /> : <UnknownValue value={pathItem} />}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <UnknownValue value={callback} />
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function PathItemSummaryList({ title, entries }: { title: string; entries: Array<[string, unknown]> }) {
+  return (
+    <section>
+      <h5>{title}</h5>
+      <ul>
+        {entries.map(([name, value]) => (
+          <li key={name}>
+            <code>{name}</code>
+            {isPathItemObject(value) ? <PathItemSummary pathItem={value} /> : <UnknownValue value={value} />}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function PathItemSummary({ pathItem }: { pathItem: PathItemObject }) {
+  const operations = HTTP_METHODS.flatMap((method) => {
+    const operation = pathItem[method];
+    return operation ? [{ method, operation }] : [];
+  });
+
+  return (
+    <div>
+      {pathItem.summary ? <p>{pathItem.summary}</p> : null}
+      {pathItem.description ? <p>{pathItem.description}</p> : null}
+      {operations.length ? (
+        <ul>
+          {operations.map(({ method, operation }) => (
+            <li key={method}>
+              <MethodLabel method={method} /> {operation.summary ?? operation.operationId ?? 'Callback operation'}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
   );
 }
 
@@ -904,6 +1245,18 @@ function UnknownValue({ value }: { value: unknown }) {
   return <pre>{JSON.stringify(value, null, 2)}</pre>;
 }
 
+function ExternalDocsLink({ docs }: { docs: ExternalDocumentationObject }) {
+  return <ExternalLink href={docs.url}>{docs.description ?? docs.url}</ExternalLink>;
+}
+
+function ExternalLink({ href, children }: { href: string; children: ReactNode }) {
+  return (
+    <a href={href} rel="noreferrer" target="_blank">
+      {children}
+    </a>
+  );
+}
+
 function MethodLabel({ method }: { method: NormalizedOperation['method'] }) {
   return <strong>{method.toUpperCase()}</strong>;
 }
@@ -924,6 +1277,53 @@ function getCountedOptions(operations: NormalizedOperation[], getValues: (operat
 
 function toggleArrayValue<T>(values: T[], value: T) {
   return values.includes(value) ? values.filter((current) => current !== value) : [...values, value];
+}
+
+const HTTP_METHODS: HttpMethod[] = ['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace'];
+
+function getComponentSchemas(document: OpenAPIObject): Record<string, unknown> {
+  const components = isRecord(document.components) && isRecord(document.components.schemas) ? document.components.schemas : {};
+  return { ...(document.definitions ?? {}), ...components };
+}
+
+function getSourceOperation(document: OpenAPIObject, operation: NormalizedOperation): OperationObject | undefined {
+  const pathItem = document.paths?.[operation.path];
+
+  if (!pathItem || isReferenceObject(pathItem)) {
+    return undefined;
+  }
+
+  return pathItem[operation.method];
+}
+
+function getOperationProduces(document: OpenAPIObject, operation: NormalizedOperation): string[] {
+  return getSourceOperation(document, operation)?.produces ?? document.produces ?? [];
+}
+
+function getResponseStatusLabel(statusRange: string, category: string) {
+  const descriptions: Record<string, string> = {
+    '1xx': 'Informational',
+    '2xx': 'Success',
+    '3xx': 'Redirect',
+    '4xx': 'Client error',
+    '5xx': 'Server error',
+    default: 'Default response',
+    unknown: 'Unknown status',
+  };
+
+  return `${descriptions[statusRange] ?? statusRange} (${category})`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isExampleObject(value: unknown): value is ExampleObject {
+  return isRecord(value) && ('value' in value || 'externalValue' in value || 'summary' in value || 'description' in value);
+}
+
+function isPathItemObject(value: unknown): value is PathItemObject {
+  return isRecord(value) && ('$ref' in value || 'summary' in value || 'description' in value || HTTP_METHODS.some((method) => method in value));
 }
 
 function createTryItOutState(operation: NormalizedOperation): TryItOutState {
