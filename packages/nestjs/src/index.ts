@@ -1,13 +1,31 @@
 import type { INestApplication } from '@nestjs/common';
 import type { OpenAPIObject } from '@better-openapi-viewer/core';
 
+export type BetterOpenApiViewerDocumentFactory = () => OpenAPIObject | Promise<OpenAPIObject>;
+
+export type BetterOpenApiViewerSpec = {
+  name: string;
+  path?: string;
+  jsonPath?: string;
+  document?: OpenAPIObject;
+  documentFactory?: BetterOpenApiViewerDocumentFactory;
+  title?: string;
+};
+
+export type BetterOpenApiViewerStaticAssetsOptions = {
+  path?: string;
+  serve?: (context: { app: INestApplication; path: string }) => void;
+};
+
 export type BetterOpenApiViewerOptions = {
   path?: string;
   jsonPath?: string;
   document?: OpenAPIObject;
-  documentFactory?: () => OpenAPIObject | Promise<OpenAPIObject>;
+  documentFactory?: BetterOpenApiViewerDocumentFactory;
   cacheDocument?: boolean;
+  specs?: BetterOpenApiViewerSpec[];
   title?: string;
+  staticAssets?: BetterOpenApiViewerStaticAssetsOptions | false;
   customCss?: string;
   customCssUrl?: string | string[];
   customJs?: string;
@@ -23,66 +41,60 @@ export type BetterOpenApiViewerOptions = {
 
 export function setupBetterOpenApiViewer(app: INestApplication, options: BetterOpenApiViewerOptions = {}) {
   const uiPath = normalizeRoute(options.path ?? 'docs');
-  const jsonPath = normalizeRoute(options.jsonPath ?? `${uiPath}/openapi.json`);
-  let cachedDocument = options.document;
+  const specs = createSpecEntries(options, uiPath);
+  const staticAssets = options.staticAssets || undefined;
+  const assetPath = normalizeRoute(staticAssets?.path ?? `${uiPath}/assets`);
 
-  if (!cachedDocument && !options.documentFactory) {
-    throw new Error('setupBetterOpenApiViewer requires an OpenAPI document or documentFactory.');
+  if (staticAssets) {
+    staticAssets.serve?.({ app, path: `/${assetPath}` });
   }
 
-  const getDocument = async () => {
-    if (cachedDocument) {
-      return cachedDocument;
-    }
-
-    const document = await options.documentFactory?.();
-
-    if (!document) {
-      throw new Error('setupBetterOpenApiViewer documentFactory did not return an OpenAPI document.');
-    }
-
-    if (options.cacheDocument ?? true) {
-      cachedDocument = document;
-    }
-
-    return document;
-  };
-
-  const httpAdapter = app.getHttpAdapter();
-  const instance = httpAdapter.getInstance();
-
-  instance.get(`/${jsonPath}`, async (_request: unknown, response: JsonResponse) => {
-    sendJson(response, await getDocument());
+  specs.forEach((spec) => {
+    registerGet(app, `/${spec.jsonPath}`, async (_request, response) => {
+      sendJson(response, await spec.getDocument());
+    });
   });
 
-  instance.get(`/${uiPath}`, async (_request: unknown, response: HtmlResponse) => {
-    const document = await getDocument();
-    sendHtml(
-      response,
-      renderViewerHtml({
-        jsonPath: `/${jsonPath}`,
-        title: options.title ?? document.info?.title ?? 'Better OpenAPI Viewer',
-        customCss: options.customCss,
-        customCssUrl: options.customCssUrl,
-        customJs: options.customJs,
-        customJsUrl: options.customJsUrl,
-        faviconUrl: options.faviconUrl,
-        config: {
-          defaultExpansion: options.defaultExpansion ?? 'list',
-          deepLinking: options.deepLinking ?? true,
-          filter: options.filter ?? true,
-          displayRequestDuration: options.displayRequestDuration ?? true,
-          supportedSubmitMethods: options.supportedSubmitMethods ?? ['get', 'put', 'post', 'delete', 'patch', 'options', 'head'],
-          persistAuthorization: options.persistAuthorization ?? false,
-        },
-      }),
-    );
+  specs
+    .filter((spec) => spec.uiPath !== uiPath)
+    .forEach((spec) => {
+      registerGet(app, `/${spec.uiPath}`, async (_request, response) => {
+        sendHtml(response, renderViewerHtmlForSpec(spec, specs, options, assetPath, await spec.getDocument()));
+      });
+    });
+
+  registerGet(app, `/${uiPath}`, async (_request, response) => {
+    const spec = specs[0] as SpecEntry;
+    sendHtml(response, renderViewerHtmlForSpec(spec, specs, options, assetPath, await spec.getDocument()));
   });
 }
 
+type SpecEntry = {
+  name: string;
+  uiPath: string;
+  jsonPath: string;
+  title?: string;
+  getDocument: () => Promise<OpenAPIObject>;
+};
+
+type RouteResponse = JsonResponse & HtmlResponse;
+type RouteHandler = (request: unknown, response: RouteResponse) => void | Promise<void>;
+
+type HttpAdapter = {
+  get?: (path: string, handler: RouteHandler) => void;
+  getInstance?: () => {
+    get?: (path: string, handler: RouteHandler) => void;
+  };
+};
+
+type NestAppWithStaticAssets = INestApplication & {
+  useStaticAssets?: (path: string, options?: Record<string, unknown>) => void;
+};
+
 type JsonResponse = {
+  header?: (name: string, value: string) => JsonResponse;
   json?: (value: OpenAPIObject) => void;
-  send?: (value: OpenAPIObject) => void;
+  send?: (value: OpenAPIObject | string) => void;
 };
 
 type HtmlResponse = {
@@ -91,13 +103,119 @@ type HtmlResponse = {
   send: (value: string) => void;
 };
 
+function createSpecEntries(options: BetterOpenApiViewerOptions, uiPath: string) {
+  const specOptions =
+    options.specs && options.specs.length > 0
+      ? options.specs
+      : [
+          {
+            name: options.title ?? 'OpenAPI',
+            path: uiPath,
+            jsonPath: options.jsonPath,
+            document: options.document,
+            documentFactory: options.documentFactory,
+            title: options.title,
+          },
+        ];
+
+  return specOptions.map<SpecEntry>((spec, index) => {
+    let cachedDocument = spec.document;
+
+    if (!cachedDocument && !spec.documentFactory) {
+      throw new Error(`setupBetterOpenApiViewer requires an OpenAPI document or documentFactory for spec "${spec.name}".`);
+    }
+
+    const specUiPath = normalizeRoute(spec.path ?? (index === 0 ? uiPath : `${uiPath}/${slugify(spec.name)}`));
+    const specJsonPath = normalizeRoute(spec.jsonPath ?? `${specUiPath}/openapi.json`);
+
+    return {
+      name: spec.name,
+      uiPath: specUiPath,
+      jsonPath: specJsonPath,
+      title: spec.title,
+      getDocument: async () => {
+        if (cachedDocument) {
+          return cachedDocument;
+        }
+
+        const document = await spec.documentFactory?.();
+
+        if (!document) {
+          throw new Error(`setupBetterOpenApiViewer documentFactory did not return an OpenAPI document for spec "${spec.name}".`);
+        }
+
+        if (options.cacheDocument ?? true) {
+          cachedDocument = document;
+        }
+
+        return document;
+      },
+    };
+  });
+}
+
+function registerGet(app: INestApplication, path: string, handler: RouteHandler) {
+  const httpAdapter = app.getHttpAdapter() as HttpAdapter;
+  const routeTarget = httpAdapter.get ? httpAdapter : httpAdapter.getInstance?.();
+
+  if (!routeTarget?.get) {
+    throw new Error('setupBetterOpenApiViewer could not register a GET route with the active NestJS HTTP adapter.');
+  }
+
+  routeTarget.get(path, handler);
+}
+
+function renderViewerHtmlForSpec(
+  spec: SpecEntry,
+  specs: SpecEntry[],
+  options: BetterOpenApiViewerOptions,
+  assetPath: string,
+  document: OpenAPIObject,
+) {
+  return renderViewerHtml({
+    jsonPath: `/${spec.jsonPath}`,
+    title: spec.title ?? options.title ?? document.info?.title ?? spec.name,
+    specs: specs.map((item) => ({
+      name: item.name,
+      path: `/${item.uiPath}`,
+      jsonPath: `/${item.jsonPath}`,
+    })),
+    assetPath: `/${assetPath}`,
+    customCss: options.customCss,
+    customCssUrl: options.customCssUrl,
+    customJs: options.customJs,
+    customJsUrl: options.customJsUrl,
+    faviconUrl: options.faviconUrl,
+    config: {
+      defaultExpansion: options.defaultExpansion ?? 'list',
+      deepLinking: options.deepLinking ?? true,
+      filter: options.filter ?? true,
+      displayRequestDuration: options.displayRequestDuration ?? true,
+      supportedSubmitMethods: options.supportedSubmitMethods ?? ['get', 'put', 'post', 'delete', 'patch', 'options', 'head'],
+      persistAuthorization: options.persistAuthorization ?? false,
+    },
+  });
+}
+
 function normalizeRoute(route: string) {
   return route.replace(/^\/+|\/+$/g, '');
+}
+
+function slugify(value: string) {
+  const slug = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+
+  return slug || 'spec';
 }
 
 function renderViewerHtml({
   jsonPath,
   title,
+  specs,
+  assetPath,
   customCss,
   customCssUrl,
   customJs,
@@ -107,6 +225,8 @@ function renderViewerHtml({
 }: {
   jsonPath: string;
   title: string;
+  specs: Array<{ name: string; path: string; jsonPath: string }>;
+  assetPath: string;
   customCss?: string;
   customCssUrl?: string | string[];
   customJs?: string;
@@ -121,8 +241,14 @@ function renderViewerHtml({
     persistAuthorization: boolean;
   };
 }) {
-  const serializedConfig = JSON.stringify({ jsonPath, ...config }).replace(/</g, '\\u003c');
+  const serializedConfig = JSON.stringify({ jsonPath, specs, assetPath, ...config }).replace(/</g, '\\u003c');
   const escapedTitle = escapeHtml(title);
+  const specLinks =
+    specs.length > 1
+      ? `<nav aria-label="OpenAPI documents">${specs
+          .map((spec) => `<a href="${escapeAttribute(spec.path)}">${escapeHtml(spec.name)}</a>`)
+          .join('')}</nav>`
+      : '';
   const cssLinks = asArray(customCssUrl)
     .map((url) => `<link rel="stylesheet" href="${escapeAttribute(url)}" />`)
     .join('\n    ');
@@ -143,6 +269,8 @@ function renderViewerHtml({
       body { margin: 0; background: #f7f8fb; color: #151923; }
       main { max-width: 1120px; margin: 0 auto; padding: 48px 24px; }
       h1 { font-size: 40px; margin: 0 0 8px; }
+      nav { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 24px; }
+      nav a { border: 1px solid #ccd2df; border-radius: 8px; color: inherit; padding: 8px 10px; text-decoration: none; }
       input { box-sizing: border-box; width: 100%; padding: 14px 16px; border: 1px solid #ccd2df; border-radius: 8px; font: inherit; }
       ul { list-style: none; padding: 0; display: grid; gap: 10px; }
       li { background: #fff; border: 1px solid #dfe4ee; border-radius: 8px; padding: 14px 16px; }
@@ -153,6 +281,7 @@ function renderViewerHtml({
   </head>
   <body>
     <main>
+      ${specLinks}
       <p class="muted">OpenAPI document: <a href="${jsonPath}">${jsonPath}</a></p>
       <h1 id="title">Better OpenAPI Viewer</h1>
       <p id="description" class="muted"></p>
@@ -255,6 +384,7 @@ function renderViewerHtml({
 }
 
 function sendJson(response: JsonResponse, value: OpenAPIObject) {
+  response.header?.('content-type', 'application/json');
   if (response.json) {
     response.json(value);
     return;
@@ -267,6 +397,13 @@ function sendHtml(response: HtmlResponse, value: string) {
   response.type?.('text/html');
   response.header?.('content-type', 'text/html');
   response.send(value);
+}
+
+export function serveBetterOpenApiViewerStaticAssets(path: string) {
+  return ({ app, path: mountPath }: { app: INestApplication; path: string }) => {
+    const nestApp = app as NestAppWithStaticAssets;
+    nestApp.useStaticAssets?.(path, { prefix: mountPath });
+  };
 }
 
 function asArray<T>(value: T | T[] | undefined) {
