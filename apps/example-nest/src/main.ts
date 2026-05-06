@@ -11,6 +11,9 @@ async function bootstrap() {
     .setTitle('Example API')
     .setDescription('Demo API for Better OpenAPI Viewer development.')
     .setVersion('0.0.0')
+    .addBearerAuth()
+    .addServer('http://localhost:3000', 'Local development')
+    .addServer('/api', 'Relative API prefix')
     .build();
   const document = SwaggerModule.createDocument(app, config);
 
