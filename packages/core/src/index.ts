@@ -217,6 +217,60 @@ export type OperationFilter = {
   contentTypes?: string[];
 };
 
+export type ViewerLayout = 'BaseLayout' | 'StandaloneLayout' | string;
+
+export type ViewerDefaultExpansion = 'list' | 'full' | 'none';
+
+export type ViewerSyntaxHighlightingConfig = {
+  activated?: boolean;
+  theme?: string;
+};
+
+export type ViewerSorter<T> = ((left: T, right: T) => number) | 'alpha' | 'method' | 'none';
+
+export type ViewerPlugin = {
+  name?: string;
+  [key: string]: unknown;
+};
+
+export type ViewerConfig = {
+  routePath?: string;
+  jsonPath?: string;
+  title?: string;
+  layout?: ViewerLayout;
+  defaultExpansion?: ViewerDefaultExpansion;
+  deepLinking?: boolean;
+  filter?: boolean | string;
+  displayRequestDuration?: boolean;
+  persistAuthorization?: boolean;
+  syntaxHighlight?: boolean | ViewerSyntaxHighlightingConfig;
+  supportedSubmitMethods?: HttpMethod[];
+  operationsSorter?: ViewerSorter<NormalizedOperation>;
+  tagsSorter?: ViewerSorter<OperationTagGroup>;
+  defaultModelExpandDepth?: number;
+  plugins?: ViewerPlugin[];
+};
+
+export type ResolvedViewerConfig = Required<
+  Pick<
+    ViewerConfig,
+    | 'routePath'
+    | 'jsonPath'
+    | 'title'
+    | 'layout'
+    | 'defaultExpansion'
+    | 'deepLinking'
+    | 'filter'
+    | 'displayRequestDuration'
+    | 'persistAuthorization'
+    | 'syntaxHighlight'
+    | 'supportedSubmitMethods'
+    | 'defaultModelExpandDepth'
+    | 'plugins'
+  >
+> &
+  Pick<ViewerConfig, 'operationsSorter' | 'tagsSorter'>;
+
 export type ResolvedReference<T = unknown> = {
   value: T;
   ref: string;
@@ -339,6 +393,53 @@ export type SchemaTreeOptions = {
 
 const HTTP_METHODS: HttpMethod[] = ['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace'];
 const DEFAULT_TAG = 'default';
+const DEFAULT_SUPPORTED_SUBMIT_METHODS: HttpMethod[] = ['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace'];
+
+export const DEFAULT_VIEWER_CONFIG: ResolvedViewerConfig = {
+  routePath: 'docs',
+  jsonPath: 'docs/openapi.json',
+  title: 'Better OpenAPI Viewer',
+  layout: 'BaseLayout',
+  defaultExpansion: 'list',
+  deepLinking: true,
+  filter: true,
+  displayRequestDuration: false,
+  persistAuthorization: false,
+  syntaxHighlight: { activated: true },
+  supportedSubmitMethods: DEFAULT_SUPPORTED_SUBMIT_METHODS,
+  defaultModelExpandDepth: 1,
+  plugins: [],
+};
+
+export function mergeViewerConfig(...configs: Array<ViewerConfig | undefined>): ResolvedViewerConfig {
+  return configs.reduce<ResolvedViewerConfig>((merged, config) => {
+    if (!config) {
+      return merged;
+    }
+
+    return {
+      ...merged,
+      ...config,
+      supportedSubmitMethods: config.supportedSubmitMethods ? [...config.supportedSubmitMethods] : merged.supportedSubmitMethods,
+      plugins: config.plugins ? [...config.plugins] : merged.plugins,
+      syntaxHighlight: mergeSyntaxHighlightConfig(merged.syntaxHighlight, config.syntaxHighlight),
+    };
+  }, cloneViewerConfig(DEFAULT_VIEWER_CONFIG));
+}
+
+export function sortOperations(operations: NormalizedOperation[], sorter: ViewerConfig['operationsSorter'] = 'none'): NormalizedOperation[] {
+  return [...operations].sort(getOperationSorter(sorter));
+}
+
+export function sortOperationTags(tags: OperationTagGroup[], sorter: ViewerConfig['tagsSorter'] = 'none'): OperationTagGroup[] {
+  return [...tags].sort(getTagSorter(sorter));
+}
+
+export function isSubmitMethodSupported(method: HttpMethod | Uppercase<HttpMethod> | string, config: Pick<ViewerConfig, 'supportedSubmitMethods'> = {}): boolean {
+  const normalized = method.toLowerCase() as HttpMethod;
+  const supportedMethods = config.supportedSubmitMethods ?? DEFAULT_VIEWER_CONFIG.supportedSubmitMethods;
+  return supportedMethods.includes(normalized);
+}
 
 export function normalizeOpenApiDocument(document: OpenAPIObject, options: NormalizeDocumentOptions = {}): NormalizedDocument {
   const issues = validateOpenApiDocument(document);
@@ -862,6 +963,70 @@ function mergeParameters(pathParameters: Array<ParameterObject | ReferenceObject
   }
 
   return [...merged.values()];
+}
+
+function cloneViewerConfig(config: ResolvedViewerConfig): ResolvedViewerConfig {
+  return {
+    ...config,
+    supportedSubmitMethods: [...config.supportedSubmitMethods],
+    plugins: [...config.plugins],
+    syntaxHighlight: isObject(config.syntaxHighlight) ? { ...config.syntaxHighlight } : config.syntaxHighlight,
+  };
+}
+
+function mergeSyntaxHighlightConfig(
+  current: ResolvedViewerConfig['syntaxHighlight'],
+  next: ViewerConfig['syntaxHighlight'],
+): ResolvedViewerConfig['syntaxHighlight'] {
+  if (next === undefined) {
+    return isObject(current) ? { ...current } : current;
+  }
+
+  if (typeof next === 'boolean') {
+    return next;
+  }
+
+  if (typeof current === 'boolean') {
+    return { ...next };
+  }
+
+  return { ...current, ...next };
+}
+
+function getOperationSorter(sorter: ViewerConfig['operationsSorter']): (left: NormalizedOperation, right: NormalizedOperation) => number {
+  if (typeof sorter === 'function') {
+    return sorter;
+  }
+
+  if (sorter === 'alpha') {
+    return (left, right) => compareText(getOperationDisplayName(left), getOperationDisplayName(right));
+  }
+
+  if (sorter === 'method') {
+    return (left, right) => HTTP_METHODS.indexOf(left.method) - HTTP_METHODS.indexOf(right.method) || compareText(left.path, right.path);
+  }
+
+  return () => 0;
+}
+
+function getTagSorter(sorter: ViewerConfig['tagsSorter']): (left: OperationTagGroup, right: OperationTagGroup) => number {
+  if (typeof sorter === 'function') {
+    return sorter;
+  }
+
+  if (sorter === 'alpha') {
+    return (left, right) => compareText(left.name, right.name);
+  }
+
+  return () => 0;
+}
+
+function getOperationDisplayName(operation: NormalizedOperation) {
+  return operation.operationId ?? operation.summary ?? operation.path;
+}
+
+function compareText(left: string | undefined, right: string | undefined) {
+  return (left ?? '').localeCompare(right ?? '', undefined, { sensitivity: 'base' });
 }
 
 function getDefaultParameterStyle(location: ParameterObject['in']): ParameterStyle {

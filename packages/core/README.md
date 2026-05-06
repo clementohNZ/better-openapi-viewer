@@ -14,3 +14,27 @@ Framework-agnostic OpenAPI normalization and viewer primitives.
 - Security scheme extraction across OpenAPI 3.x `components.securitySchemes` and Swagger 2.0 `securityDefinitions`.
 - Markdown-safe text escaping for descriptions that need to be rendered through Markdown-aware surfaces.
 - Try It Out request primitives for server selection and variable substitution, common parameter serialization styles (`form`, `simple`, `spaceDelimited`, `pipeDelimited`, and `deepObject`), request URL/header/cookie/body construction, basic/bearer/api-key credential application, and curl snippet generation.
+- Viewer configuration primitives for route path, JSON path, title, layout, default expansion, deep linking, filter, request duration display, persisted auth, syntax highlighting, supported submit methods, operation/tag sorters, model expansion depth, and plugin metadata.
+
+## Viewer config
+
+`ViewerConfig` captures the framework-agnostic knobs adapters and UIs can share without depending on a specific renderer. Use `mergeViewerConfig` to layer package defaults, adapter defaults, and user overrides.
+
+```ts
+import { mergeViewerConfig } from '@better-openapi-viewer/core';
+
+const config = mergeViewerConfig({
+  title: 'Example API',
+  defaultExpansion: 'list',
+  deepLinking: true,
+  filter: true,
+  displayRequestDuration: true,
+  persistAuthorization: false,
+  supportedSubmitMethods: ['get', 'post', 'patch', 'delete'],
+  operationsSorter: 'alpha',
+  tagsSorter: 'alpha',
+  defaultModelExpandDepth: 2,
+});
+```
+
+`sortOperations`, `sortOperationTags`, and `isSubmitMethodSupported` provide reusable behavior for consumers that want to honor the same configuration in different runtimes.
