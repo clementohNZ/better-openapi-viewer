@@ -1,10 +1,12 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import {
+  filterOperations,
   getOperations,
   groupOperationsByTag,
-  searchOperations,
+  type HttpMethod,
   type NormalizedOperation,
   type OpenAPIObject,
+  type OperationFilter,
   type ParameterObject,
   type ReferenceObject,
   type SecurityRequirementObject,
@@ -17,9 +19,49 @@ export type BetterOpenApiViewerProps = {
 
 export function BetterOpenApiViewer({ document }: BetterOpenApiViewerProps) {
   const [query, setQuery] = useState('');
+  const [selectedMethods, setSelectedMethods] = useState<HttpMethod[]>([]);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [authFilter, setAuthFilter] = useState<NonNullable<OperationFilter['auth']>>('any');
+  const [deprecatedFilter, setDeprecatedFilter] = useState('any');
+  const [selectedContentTypes, setSelectedContentTypes] = useState<string[]>([]);
   const [expandedOperations, setExpandedOperations] = useState<Set<string>>(() => new Set());
   const operations = useMemo(() => getOperations(document), [document]);
-  const filteredOperations = useMemo(() => searchOperations(operations, query), [operations, query]);
+  const methodOptions = useMemo(() => getCountedOptions(operations, (operation) => [operation.method]), [operations]);
+  const tagOptions = useMemo(() => getCountedOptions(operations, (operation) => operation.tags), [operations]);
+  const contentTypeOptions = useMemo(() => getCountedOptions(operations, (operation) => operation.contentTypes), [operations]);
+  const authCounts = useMemo(
+    () => ({
+      required: operations.filter((operation) => operation.requiresAuth).length,
+      none: operations.filter((operation) => !operation.requiresAuth).length,
+    }),
+    [operations],
+  );
+  const deprecatedCounts = useMemo(
+    () => ({
+      active: operations.filter((operation) => !operation.deprecated).length,
+      deprecated: operations.filter((operation) => operation.deprecated).length,
+    }),
+    [operations],
+  );
+  const activeFilterCount =
+    Number(Boolean(query.trim())) +
+    selectedMethods.length +
+    selectedTags.length +
+    Number(authFilter !== 'any') +
+    Number(deprecatedFilter !== 'any') +
+    selectedContentTypes.length;
+  const filteredOperations = useMemo(
+    () =>
+      filterOperations(operations, {
+        query,
+        methods: selectedMethods,
+        tags: selectedTags,
+        auth: authFilter,
+        deprecated: deprecatedFilter === 'any' ? undefined : deprecatedFilter === 'deprecated',
+        contentTypes: selectedContentTypes,
+      }),
+    [authFilter, deprecatedFilter, operations, query, selectedContentTypes, selectedMethods, selectedTags],
+  );
   const groupedOperations = useMemo(() => groupOperationsByTag(filteredOperations, document.tags), [document.tags, filteredOperations]);
 
   const toggleOperation = (operationId: string) => {
@@ -38,6 +80,14 @@ export function BetterOpenApiViewer({ document }: BetterOpenApiViewerProps) {
 
   const expandAll = () => setExpandedOperations(new Set(filteredOperations.map((operation) => operation.id)));
   const collapseAll = () => setExpandedOperations(new Set());
+  const resetFilters = () => {
+    setQuery('');
+    setSelectedMethods([]);
+    setSelectedTags([]);
+    setAuthFilter('any');
+    setDeprecatedFilter('any');
+    setSelectedContentTypes([]);
+  };
 
   return (
     <main>
@@ -49,6 +99,9 @@ export function BetterOpenApiViewer({ document }: BetterOpenApiViewerProps) {
 
       <section aria-labelledby="endpoint-navigation-heading">
         <h2 id="endpoint-navigation-heading">Endpoints</h2>
+        <p>
+          Showing {filteredOperations.length} of {operations.length} operations.
+        </p>
         <label>
           Search endpoints
           <input
@@ -58,12 +111,87 @@ export function BetterOpenApiViewer({ document }: BetterOpenApiViewerProps) {
             placeholder="Method, path, tag, summary, parameter..."
           />
         </label>
+        <FilterFieldset legend="Methods">
+          {methodOptions.map(({ value, count }) => (
+            <CheckboxFilter
+              key={value}
+              label={value.toUpperCase()}
+              count={count}
+              checked={selectedMethods.includes(value as HttpMethod)}
+              onChange={() => setSelectedMethods((current) => toggleArrayValue(current, value as HttpMethod))}
+            />
+          ))}
+        </FilterFieldset>
+        <FilterFieldset legend="Tags">
+          {tagOptions.map(({ value, count }) => (
+            <CheckboxFilter
+              key={value}
+              label={value}
+              count={count}
+              checked={selectedTags.includes(value)}
+              onChange={() => setSelectedTags((current) => toggleArrayValue(current, value))}
+            />
+          ))}
+        </FilterFieldset>
+        <FilterFieldset legend="Auth">
+          <RadioFilter label="Any auth state" count={operations.length} checked={authFilter === 'any'} onChange={() => setAuthFilter('any')} />
+          <RadioFilter
+            label="Requires auth"
+            count={authCounts.required}
+            checked={authFilter === 'required'}
+            onChange={() => setAuthFilter('required')}
+          />
+          <RadioFilter label="No auth" count={authCounts.none} checked={authFilter === 'none'} onChange={() => setAuthFilter('none')} />
+        </FilterFieldset>
+        <FilterFieldset legend="Status">
+          <RadioFilter
+            label="Any status"
+            count={operations.length}
+            checked={deprecatedFilter === 'any'}
+            onChange={() => setDeprecatedFilter('any')}
+            name="deprecated-filter"
+          />
+          <RadioFilter
+            label="Active"
+            count={deprecatedCounts.active}
+            checked={deprecatedFilter === 'active'}
+            onChange={() => setDeprecatedFilter('active')}
+            name="deprecated-filter"
+          />
+          <RadioFilter
+            label="Deprecated"
+            count={deprecatedCounts.deprecated}
+            checked={deprecatedFilter === 'deprecated'}
+            onChange={() => setDeprecatedFilter('deprecated')}
+            name="deprecated-filter"
+          />
+        </FilterFieldset>
+        {contentTypeOptions.length ? (
+          <FilterFieldset legend="Content types">
+            {contentTypeOptions.map(({ value, count }) => (
+              <CheckboxFilter
+                key={value}
+                label={value}
+                count={count}
+                checked={selectedContentTypes.includes(value)}
+                onChange={() => setSelectedContentTypes((current) => toggleArrayValue(current, value))}
+              />
+            ))}
+          </FilterFieldset>
+        ) : null}
+        {activeFilterCount ? (
+          <button type="button" onClick={resetFilters}>
+            Reset filters ({activeFilterCount})
+          </button>
+        ) : null}
 
         <nav aria-label="Endpoint navigation">
           {groupedOperations.length ? (
             groupedOperations.map(({ name, operations: tagOperations }) => (
               <section key={name} aria-labelledby={`tag-nav-${toDomId(name)}`}>
-                <h3 id={`tag-nav-${toDomId(name)}`}>{name}</h3>
+                <h3 id={`tag-nav-${toDomId(name)}`}>
+                  {name} ({tagOperations.length})
+                </h3>
                 <ul>
                   {tagOperations.map((operation) => (
                     <li key={`${name}:${operation.id}`}>
@@ -93,7 +221,9 @@ export function BetterOpenApiViewer({ document }: BetterOpenApiViewerProps) {
         </div>
         {groupedOperations.map(({ name, description, operations: tagOperations }) => (
           <section key={name} aria-labelledby={`tag-${toDomId(name)}`}>
-            <h3 id={`tag-${toDomId(name)}`}>{name}</h3>
+            <h3 id={`tag-${toDomId(name)}`}>
+              {name} ({tagOperations.length})
+            </h3>
             {description ? <p>{description}</p> : null}
 
             <ul>
@@ -139,6 +269,45 @@ export function BetterOpenApiViewer({ document }: BetterOpenApiViewerProps) {
 }
 
 export type { OpenAPIObject };
+
+function FilterFieldset({ legend, children }: { legend: string; children: ReactNode }) {
+  return (
+    <fieldset>
+      <legend>{legend}</legend>
+      {children}
+    </fieldset>
+  );
+}
+
+function CheckboxFilter({ label, count, checked, onChange }: { label: string; count: number; checked: boolean; onChange: () => void }) {
+  return (
+    <label>
+      <input type="checkbox" checked={checked} onChange={onChange} />
+      {label} ({count})
+    </label>
+  );
+}
+
+function RadioFilter({
+  label,
+  count,
+  checked,
+  onChange,
+  name = 'auth-filter',
+}: {
+  label: string;
+  count: number;
+  checked: boolean;
+  onChange: () => void;
+  name?: string;
+}) {
+  return (
+    <label>
+      <input type="radio" name={name} checked={checked} onChange={onChange} />
+      {label} ({count})
+    </label>
+  );
+}
 
 function OperationOverview({ operation }: { operation: NormalizedOperation }) {
   return (
@@ -319,6 +488,24 @@ function UnknownValue({ value }: { value: unknown }) {
 
 function MethodLabel({ method }: { method: NormalizedOperation['method'] }) {
   return <strong>{method.toUpperCase()}</strong>;
+}
+
+function getCountedOptions(operations: NormalizedOperation[], getValues: (operation: NormalizedOperation) => string[]) {
+  const counts = new Map<string, number>();
+
+  for (const operation of operations) {
+    for (const value of getValues(operation)) {
+      counts.set(value, (counts.get(value) ?? 0) + 1);
+    }
+  }
+
+  return [...counts.entries()]
+    .map(([value, count]) => ({ value, count }))
+    .sort((left, right) => left.value.localeCompare(right.value));
+}
+
+function toggleArrayValue<T>(values: T[], value: T) {
+  return values.includes(value) ? values.filter((current) => current !== value) : [...values, value];
 }
 
 function toDomId(value: string) {
