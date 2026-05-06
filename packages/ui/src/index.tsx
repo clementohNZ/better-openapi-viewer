@@ -1,16 +1,23 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import {
+  buildTryItOutRequest,
   filterOperations,
+  generateCurlSnippet,
+  getMediaTypeExample,
   getOperations,
   groupOperationsByTag,
   type HttpMethod,
+  type MediaTypeObject,
   type NormalizedOperation,
   type OpenAPIObject,
   type OperationFilter,
   type ParameterObject,
   type ReferenceObject,
+  type RequestBodyObject,
+  type SerializableParameterValue,
   type SecurityRequirementObject,
   type ServerObject,
+  type TryItOutRequest,
 } from '@better-openapi-viewer/core';
 
 export type BetterOpenApiViewerProps = {
@@ -254,6 +261,7 @@ export function BetterOpenApiViewer({ document }: BetterOpenApiViewerProps) {
                           <UnknownRecordSection title="Responses" value={operation.responses} emptyMessage="No responses documented." />
                           <Security security={operation.security} />
                           <Servers servers={operation.servers} />
+                          <TryItOut operation={operation} document={document} />
                         </div>
                       ) : null}
                     </article>
@@ -437,6 +445,243 @@ function Servers({ servers }: { servers: ServerObject[] }) {
   );
 }
 
+type TryItOutResponse = {
+  status: number;
+  statusText: string;
+  durationMs: number;
+  headers: Record<string, string>;
+  body: string;
+};
+
+type TryItOutState = {
+  enabled: boolean;
+  serverUrl: string;
+  contentType: string;
+  parameters: Record<string, string>;
+  bodyText: string;
+  bodyFormat: 'json' | 'text';
+  response?: TryItOutResponse;
+  error?: string;
+  isSending: boolean;
+};
+
+function TryItOut({ operation, document }: { operation: NormalizedOperation; document: OpenAPIObject }) {
+  const initialState = useMemo(() => createTryItOutState(operation), [operation]);
+  const [state, setState] = useState<TryItOutState>(initialState);
+  const parameterFields = useMemo(() => operation.parameters.filter((parameter): parameter is ParameterObject => !isReferenceObject(parameter)), [operation.parameters]);
+  const request = useMemo(
+    () => buildTryItOutRequestForState({ document, operation, state }),
+    [document, operation, state.bodyFormat, state.bodyText, state.contentType, state.parameters, state.serverUrl],
+  );
+
+  const updateParameter = (name: string, value: string) => {
+    setState((current) => ({ ...current, parameters: { ...current.parameters, [name]: value } }));
+  };
+
+  const sendRequest = async () => {
+    setState((current) => ({ ...current, error: undefined, isSending: true, response: undefined }));
+    const startedAt = performance.now();
+
+    try {
+      const response = await fetch(request.url, {
+        method: request.method,
+        headers: request.headers,
+        body: request.body,
+      });
+      const body = await response.text();
+      const durationMs = Math.round(performance.now() - startedAt);
+
+      setState((current) => ({
+        ...current,
+        isSending: false,
+        response: {
+          status: response.status,
+          statusText: response.statusText,
+          durationMs,
+          headers: Object.fromEntries(response.headers.entries()),
+          body,
+        },
+      }));
+    } catch (error) {
+      setState((current) => ({
+        ...current,
+        isSending: false,
+        error: error instanceof Error ? error.message : 'Request failed.',
+      }));
+    }
+  };
+
+  return (
+    <section aria-labelledby={`${toDomId(operation.id)}-try-it-out`}>
+      <h4 id={`${toDomId(operation.id)}-try-it-out`}>Try It Out</h4>
+      <label>
+        <input
+          type="checkbox"
+          checked={state.enabled}
+          onChange={(event) => setState((current) => ({ ...current, enabled: event.currentTarget.checked }))}
+        />
+        Enable request editing
+      </label>
+      {state.enabled ? (
+        <div>
+          <fieldset>
+            <legend>Request setup</legend>
+            <label>
+              Server
+              <select value={state.serverUrl} onChange={(event) => setState((current) => ({ ...current, serverUrl: event.currentTarget.value }))}>
+                {getServerOptions(operation).map((server) => (
+                  <option key={server.url} value={server.url}>
+                    {server.description ? `${server.url} - ${server.description}` : server.url}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {getRequestBodyContentTypes(operation).length ? (
+              <label>
+                Content type
+                <select
+                  value={state.contentType}
+                  onChange={(event) =>
+                    setState((current) => {
+                      const contentType = event.currentTarget.value;
+                      return {
+                        ...current,
+                        contentType,
+                        bodyFormat: isJsonContentType(contentType) ? 'json' : 'text',
+                        bodyText: formatInitialBody(operation, contentType),
+                      };
+                    })
+                  }
+                >
+                  {getRequestBodyContentTypes(operation).map((contentType) => (
+                    <option key={contentType} value={contentType}>
+                      {contentType}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+          </fieldset>
+
+          <fieldset>
+            <legend>Parameters</legend>
+            {parameterFields.length ? (
+              parameterFields.map((parameter) => (
+                <label key={`${parameter.in}:${parameter.name}`}>
+                  {parameter.name} ({parameter.in}){parameter.required ? ' required' : ''}
+                  <input
+                    value={state.parameters[parameter.name] ?? ''}
+                    required={parameter.required}
+                    onChange={(event) => updateParameter(parameter.name, event.currentTarget.value)}
+                    aria-describedby={parameter.description ? `${toDomId(operation.id)}-${toDomId(parameter.name)}-description` : undefined}
+                  />
+                  {parameter.description ? <span id={`${toDomId(operation.id)}-${toDomId(parameter.name)}-description`}>{parameter.description}</span> : null}
+                </label>
+              ))
+            ) : (
+              <p>No editable parameters.</p>
+            )}
+          </fieldset>
+
+          {state.contentType ? (
+            <label>
+              Request body
+              <textarea
+                rows={8}
+                value={state.bodyText}
+                onChange={(event) => setState((current) => ({ ...current, bodyText: event.currentTarget.value }))}
+              />
+            </label>
+          ) : null}
+
+          <GeneratedRequest request={request} />
+          <div>
+            <button type="button" onClick={sendRequest} disabled={state.isSending}>
+              {state.isSending ? 'Sending...' : 'Send request'}
+            </button>
+            <button type="button" onClick={() => setState({ ...createTryItOutState(operation), enabled: true })}>
+              Reset inputs
+            </button>
+          </div>
+          <TryItOutResult state={state} />
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function GeneratedRequest({ request }: { request: TryItOutRequest }) {
+  return (
+    <section>
+      <h5>Generated request</h5>
+      <dl>
+        <div>
+          <dt>URL</dt>
+          <dd>
+            <code>{request.url}</code>
+          </dd>
+        </div>
+        <div>
+          <dt>Headers</dt>
+          <dd>
+            <UnknownValue value={request.headers} />
+          </dd>
+        </div>
+        <div>
+          <dt>Body</dt>
+          <dd>{request.body === undefined ? 'No body.' : <pre>{request.body}</pre>}</dd>
+        </div>
+        <div>
+          <dt>curl</dt>
+          <dd>
+            <pre>{generateCurlSnippet(request)}</pre>
+          </dd>
+        </div>
+      </dl>
+    </section>
+  );
+}
+
+function TryItOutResult({ state }: { state: TryItOutState }) {
+  if (state.error) {
+    return <p role="alert">Request failed: {state.error}</p>;
+  }
+
+  if (!state.response) {
+    return null;
+  }
+
+  return (
+    <section aria-live="polite">
+      <h5>Response</h5>
+      <dl>
+        <div>
+          <dt>Status</dt>
+          <dd>
+            {state.response.status} {state.response.statusText}
+          </dd>
+        </div>
+        <div>
+          <dt>Duration</dt>
+          <dd>{state.response.durationMs} ms</dd>
+        </div>
+        <div>
+          <dt>Headers</dt>
+          <dd>
+            <UnknownValue value={state.response.headers} />
+          </dd>
+        </div>
+        <div>
+          <dt>Body</dt>
+          <dd>
+            <pre>{state.response.body}</pre>
+          </dd>
+        </div>
+      </dl>
+    </section>
+  );
+}
+
 function UnknownRecordSection({
   title,
   value,
@@ -506,6 +751,122 @@ function getCountedOptions(operations: NormalizedOperation[], getValues: (operat
 
 function toggleArrayValue<T>(values: T[], value: T) {
   return values.includes(value) ? values.filter((current) => current !== value) : [...values, value];
+}
+
+function createTryItOutState(operation: NormalizedOperation): TryItOutState {
+  const contentType = getRequestBodyContentTypes(operation)[0] ?? '';
+
+  return {
+    enabled: false,
+    serverUrl: getServerOptions(operation)[0]?.url ?? '',
+    contentType,
+    parameters: Object.fromEntries(
+      operation.parameters
+        .filter((parameter): parameter is ParameterObject => !isReferenceObject(parameter))
+        .map((parameter) => [parameter.name, formatParameterInitialValue(parameter)]),
+    ),
+    bodyText: formatInitialBody(operation, contentType),
+    bodyFormat: isJsonContentType(contentType) ? 'json' : 'text',
+    isSending: false,
+  };
+}
+
+function buildTryItOutRequestForState({
+  document,
+  operation,
+  state,
+}: {
+  document: OpenAPIObject;
+  operation: NormalizedOperation;
+  state: TryItOutState;
+}) {
+  return buildTryItOutRequest({
+    document,
+    operation,
+    serverUrl: state.serverUrl,
+    parameters: parseParameters(state.parameters),
+    body: state.contentType ? parseBody(state.bodyText, state.bodyFormat) : undefined,
+    contentType: state.contentType || undefined,
+  });
+}
+
+function parseParameters(parameters: Record<string, string>): Record<string, SerializableParameterValue | undefined> {
+  return Object.fromEntries(
+    Object.entries(parameters).map(([name, value]) => [name, value.trim() ? parseEditableValue(value) : undefined]),
+  );
+}
+
+function parseEditableValue(value: string): SerializableParameterValue {
+  try {
+    return JSON.parse(value) as SerializableParameterValue;
+  } catch {
+    return value;
+  }
+}
+
+function parseBody(value: string, format: TryItOutState['bodyFormat']): unknown {
+  if (!value.trim()) {
+    return undefined;
+  }
+
+  if (format === 'json') {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return value;
+    }
+  }
+
+  return value;
+}
+
+function formatParameterInitialValue(parameter: ParameterObject) {
+  if ('example' in parameter && parameter.example !== undefined) {
+    return typeof parameter.example === 'string' ? parameter.example : JSON.stringify(parameter.example, null, 2);
+  }
+
+  return '';
+}
+
+function formatInitialBody(operation: NormalizedOperation, contentType: string) {
+  const mediaType = getRequestBodyMediaTypes(operation)[contentType];
+  const example = getMediaTypeExample(mediaType);
+
+  if (example === undefined) {
+    return '';
+  }
+
+  return typeof example === 'string' ? example : JSON.stringify(example, null, 2);
+}
+
+function getRequestBodyContentTypes(operation: NormalizedOperation) {
+  return Object.keys(getRequestBodyMediaTypes(operation));
+}
+
+function getRequestBodyMediaTypes(operation: NormalizedOperation): Record<string, MediaTypeObject> {
+  const requestBody = operation.requestBody;
+
+  if (!isRequestBodyObject(requestBody) || !requestBody.content) {
+    return {};
+  }
+
+  return requestBody.content;
+}
+
+function getServerOptions(operation: NormalizedOperation) {
+  return operation.servers.length ? operation.servers : [{ url: '' }];
+}
+
+function isRequestBodyObject(value: unknown): value is RequestBodyObject {
+  return Boolean(value) && typeof value === 'object' && !isReferenceObject(value);
+}
+
+function isReferenceObject(value: unknown): value is ReferenceObject {
+  return value !== null && typeof value === 'object' && '$ref' in value;
+}
+
+function isJsonContentType(contentType: string) {
+  return contentType.toLowerCase().includes('json');
 }
 
 function toDomId(value: string) {
