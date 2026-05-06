@@ -6,6 +6,15 @@ export type BetterOpenApiViewerOptions = {
   jsonPath?: string;
   document?: OpenAPIObject;
   documentFactory?: () => OpenAPIObject;
+  title?: string;
+  customCss?: string;
+  faviconUrl?: string;
+  defaultExpansion?: 'none' | 'list' | 'full';
+  deepLinking?: boolean;
+  filter?: boolean | string;
+  displayRequestDuration?: boolean;
+  supportedSubmitMethods?: string[];
+  persistAuthorization?: boolean;
 };
 
 export function setupBetterOpenApiViewer(app: INestApplication, options: BetterOpenApiViewerOptions = {}) {
@@ -26,7 +35,22 @@ export function setupBetterOpenApiViewer(app: INestApplication, options: BetterO
 
   instance.get(`/${uiPath}`, (_request: unknown, response: { type: (value: string) => void; send: (value: string) => void }) => {
     response.type('text/html');
-    response.send(renderViewerHtml({ jsonPath: `/${jsonPath}` }));
+    response.send(
+      renderViewerHtml({
+        jsonPath: `/${jsonPath}`,
+        title: options.title ?? document.info?.title ?? 'Better OpenAPI Viewer',
+        customCss: options.customCss,
+        faviconUrl: options.faviconUrl,
+        config: {
+          defaultExpansion: options.defaultExpansion ?? 'list',
+          deepLinking: options.deepLinking ?? true,
+          filter: options.filter ?? true,
+          displayRequestDuration: options.displayRequestDuration ?? true,
+          supportedSubmitMethods: options.supportedSubmitMethods ?? ['get', 'put', 'post', 'delete', 'patch', 'options', 'head'],
+          persistAuthorization: options.persistAuthorization ?? false,
+        },
+      }),
+    );
   });
 }
 
@@ -34,13 +58,36 @@ function normalizeRoute(route: string) {
   return route.replace(/^\/+|\/+$/g, '');
 }
 
-function renderViewerHtml({ jsonPath }: { jsonPath: string }) {
+function renderViewerHtml({
+  jsonPath,
+  title,
+  customCss,
+  faviconUrl,
+  config,
+}: {
+  jsonPath: string;
+  title: string;
+  customCss?: string;
+  faviconUrl?: string;
+  config: {
+    defaultExpansion: 'none' | 'list' | 'full';
+    deepLinking: boolean;
+    filter: boolean | string;
+    displayRequestDuration: boolean;
+    supportedSubmitMethods: string[];
+    persistAuthorization: boolean;
+  };
+}) {
+  const serializedConfig = JSON.stringify({ jsonPath, ...config }).replace(/</g, '\\u003c');
+  const escapedTitle = escapeHtml(title);
+
   return `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Better OpenAPI Viewer</title>
+    <title>${escapedTitle}</title>
+    ${faviconUrl ? `<link rel="icon" href="${escapeAttribute(faviconUrl)}" />` : ''}
     <style>
       :root { color-scheme: light dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
       body { margin: 0; background: #f7f8fb; color: #151923; }
@@ -51,6 +98,7 @@ function renderViewerHtml({ jsonPath }: { jsonPath: string }) {
       li { background: #fff; border: 1px solid #dfe4ee; border-radius: 8px; padding: 14px 16px; }
       strong { display: inline-block; min-width: 72px; color: #0b6bcb; }
       .muted { color: #596276; }
+      ${customCss ?? ''}
     </style>
   </head>
   <body>
@@ -63,6 +111,7 @@ function renderViewerHtml({ jsonPath }: { jsonPath: string }) {
       <ul id="endpoints"></ul>
     </main>
     <script>
+      window.__BETTER_OPENAPI_VIEWER_CONFIG__ = ${serializedConfig};
       const httpMethods = ['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace'];
       const state = { endpoints: [] };
       const list = document.querySelector('#endpoints');
@@ -80,7 +129,7 @@ function renderViewerHtml({ jsonPath }: { jsonPath: string }) {
         ).join('');
       }
 
-      fetch('${jsonPath}')
+      fetch(window.__BETTER_OPENAPI_VIEWER_CONFIG__.jsonPath)
         .then((response) => response.json())
         .then((openapi) => {
           window.openapiDocument = openapi;
@@ -118,6 +167,19 @@ function renderViewerHtml({ jsonPath }: { jsonPath: string }) {
     </script>
   </body>
 </html>`;
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function escapeAttribute(value: string) {
+  return escapeHtml(value).replace(/`/g, '&#96;');
 }
 
 export type { OpenAPIObject };
