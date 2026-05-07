@@ -62,15 +62,60 @@ export function BetterOpenApiViewer({ document, config, persistAuthorization, pr
   const tryItOutEnabled = true;
   const [preferences, updatePreferences] = usePreferences();
   const theme = preferences.theme;
-  const setTheme = (next: 'light' | 'dark') => updatePreferences({ theme: next });
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>('appearance');
   const showOnboarding = !preferences.onboardingCompleted;
+  const openSettings = useCallback((tab: SettingsTab = 'appearance') => {
+    setSettingsTab(tab);
+    setSettingsOpen(true);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handler = (event: KeyboardEvent) => {
+      if (event.key !== ',' || event.repeat) return;
+      if (!(event.metaKey || event.ctrlKey)) return;
+      const target = event.target as HTMLElement | null;
+      if (target && target.isContentEditable) return;
+      const tag = target?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      event.preventDefault();
+      setSettingsOpen((open) => !open);
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
   const operations = useMemo(() => sortOperations(getOperations(document), viewerConfig.operationsSorter), [document, viewerConfig.operationsSorter]);
   const [selectedOperationId, setSelectedOperationId] = useState<string | null>(() => operations[0]?.id ?? null);
   const securitySchemes = useMemo(() => getSupportedSecuritySchemes(document), [document]);
   const componentSchemas = useMemo(() => getComponentSchemas(document), [document]);
-  const [authCredentials, setAuthCredentials] = useState<TryItOutAuthCredentials>(() =>
-    mergeCredentials(config?.preauthorizedCredentials, preauthorizedCredentials, viewerConfig.persistAuthorization ? readPersistedAuthCredentials(document) : {}),
+  const initialPreauthorizedCredentials = useMemo(
+    () =>
+      mergeCredentials(
+        config?.preauthorizedCredentials,
+        preauthorizedCredentials,
+        viewerConfig.persistAuthorization ? readPersistedAuthCredentials(document) : {},
+      ),
+    [config?.preauthorizedCredentials, document, preauthorizedCredentials, viewerConfig.persistAuthorization],
+  );
+  const {
+    state: serversState,
+    setActive: setActiveServer,
+    upsertServer,
+    removeServer,
+  } = useSavedServers(document, initialPreauthorizedCredentials);
+  const activeServer = useMemo(
+    () => serversState.servers.find((server) => server.id === serversState.activeId) ?? serversState.servers[0] ?? null,
+    [serversState],
+  );
+  const [cookiesByServer, setCookiesForServer] = useCookieStore(document, serversState.servers);
+  const activeServerCookies = activeServer ? cookiesByServer[activeServer.id] ?? [] : [];
+  const updateActiveServerCookies = useCallback(
+    (updater: (prev: SavedCookie[]) => SavedCookie[]) => {
+      if (!activeServer) return;
+      setCookiesForServer(activeServer.id, updater);
+    },
+    [activeServer, setCookiesForServer],
   );
   const methodOptions = useMemo(() => getCountedOptions(operations, (operation) => [operation.method]), [operations]);
   const tagOptions = useMemo(() => getCountedOptions(operations, (operation) => operation.tags), [operations]);
@@ -142,14 +187,6 @@ export function BetterOpenApiViewer({ document, config, persistAuthorization, pr
     setDeprecatedFilter('any');
     setSelectedContentTypes([]);
   };
-  const updateAuthCredentials = (credentials: TryItOutAuthCredentials) => {
-    setAuthCredentials(credentials);
-
-    if (viewerConfig.persistAuthorization) {
-      writePersistedAuthCredentials(document, credentials);
-    }
-  };
-
   return (
     <main className="bov" data-theme={theme}>
       <div className="bov-shell">
@@ -159,12 +196,12 @@ export function BetterOpenApiViewer({ document, config, persistAuthorization, pr
               type="button"
               className="bov-product-gear"
               aria-label="Open settings"
-              title="Settings"
-              onClick={() => setSettingsOpen(true)}
+              title={`Settings (${getSettingsShortcutLabel()})`}
+              onClick={() => openSettings('appearance')}
             >
-              <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="8" cy="8" r="2.2" />
-                <path d="M8 1.5v1.8M8 12.7v1.8M3.4 3.4l1.3 1.3M11.3 11.3l1.3 1.3M1.5 8h1.8M12.7 8h1.8M3.4 12.6l1.3-1.3M11.3 4.7l1.3-1.3" />
+              <svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
               </svg>
             </button>
             <p className="bov-kicker">API Reference</p>
@@ -177,6 +214,14 @@ export function BetterOpenApiViewer({ document, config, persistAuthorization, pr
               <Metric label="Models" value={Object.keys(componentSchemas).length} />
             </dl>
           </header>
+
+          <ActiveServerPanel
+            servers={serversState.servers}
+            activeServerId={serversState.activeId}
+            onSetActive={setActiveServer}
+            onOpenServerSettings={() => openSettings('servers')}
+            schemeCount={Object.keys(securitySchemes).length}
+          />
 
           {viewerConfig.filter === false ? null : (
             <section className="bov-panel" aria-labelledby="endpoint-navigation-heading">
@@ -270,13 +315,6 @@ export function BetterOpenApiViewer({ document, config, persistAuthorization, pr
             </section>
           )}
 
-          <AuthorizePanel
-            credentials={authCredentials}
-            onChange={updateAuthCredentials}
-            persistAuthorization={viewerConfig.persistAuthorization}
-            schemes={securitySchemes}
-          />
-
           <Models schemas={componentSchemas} />
 
         </aside>
@@ -340,7 +378,12 @@ export function BetterOpenApiViewer({ document, config, persistAuthorization, pr
         <OperationDetailPanel
           operation={selectedOperation}
           document={document}
-          authCredentials={authCredentials}
+          servers={serversState.servers}
+          activeServer={activeServer}
+          activeServerCookies={activeServerCookies}
+          onSetActiveServer={setActiveServer}
+          onCookiesChange={updateActiveServerCookies}
+          onOpenSettings={openSettings}
           tryItOutEnabled={tryItOutEnabled}
           viewerConfig={viewerConfig}
           securitySchemes={securitySchemes}
@@ -355,9 +398,18 @@ export function BetterOpenApiViewer({ document, config, persistAuthorization, pr
       ) : null}
       {settingsOpen ? (
         <SettingsModal
+          activeTab={settingsTab}
+          onTabChange={setSettingsTab}
           preferences={preferences}
-          onChange={updatePreferences}
+          onChangePreferences={updatePreferences}
           onClose={() => setSettingsOpen(false)}
+          serversState={serversState}
+          onSetActiveServer={setActiveServer}
+          onUpsertServer={upsertServer}
+          onRemoveServer={removeServer}
+          cookiesByServer={cookiesByServer}
+          onSetCookiesForServer={setCookiesForServer}
+          schemes={securitySchemes}
         />
       ) : null}
     </main>
@@ -367,7 +419,12 @@ export function BetterOpenApiViewer({ document, config, persistAuthorization, pr
 function OperationDetailPanel({
   operation,
   document,
-  authCredentials,
+  servers,
+  activeServer,
+  activeServerCookies,
+  onSetActiveServer,
+  onCookiesChange,
+  onOpenSettings,
   tryItOutEnabled,
   viewerConfig,
   securitySchemes,
@@ -375,7 +432,12 @@ function OperationDetailPanel({
 }: {
   operation: NormalizedOperation | null;
   document: OpenAPIObject;
-  authCredentials: TryItOutAuthCredentials;
+  servers: SavedServer[];
+  activeServer: SavedServer | null;
+  activeServerCookies: SavedCookie[];
+  onSetActiveServer: (id: string) => void;
+  onCookiesChange: (updater: (prev: SavedCookie[]) => SavedCookie[]) => void;
+  onOpenSettings: (tab?: SettingsTab) => void;
   tryItOutEnabled: boolean;
   viewerConfig: ViewerConfig;
   securitySchemes: Record<string, SecuritySchemeObject>;
@@ -446,7 +508,12 @@ function OperationDetailPanel({
         ) : (
           <div className="bov-detail-stack">
             <TryItOut
-              authCredentials={authCredentials}
+              servers={servers}
+              activeServer={activeServer}
+              activeServerCookies={activeServerCookies}
+              onSetActiveServer={onSetActiveServer}
+              onCookiesChange={onCookiesChange}
+              onOpenSettings={onOpenSettings}
               displayRequestDuration={Boolean(viewerConfig.displayRequestDuration)}
               globallyEnabled={tryItOutEnabled}
               operation={operation}
@@ -820,46 +887,79 @@ function SchemaTree({ schema, name }: { schema: unknown; name: string }) {
   return <SchemaTreeNodeView node={getSchemaTree(schema, { name })} />;
 }
 
-function SchemaTreeNodeView({ node }: { node: SchemaTreeNode }) {
-  return (
-    <details open={node.kind === 'schema'}>
-      <summary>
-        <code>{node.name}</code> {node.type ? <span>{node.type}</span> : null}
-        {node.format ? <span> ({node.format})</span> : null}
-        {node.required ? <strong> required</strong> : null}
-        {node.deprecated ? <strong> deprecated</strong> : null}
-        {node.readOnly ? <span> readOnly</span> : null}
-        {node.writeOnly ? <span> writeOnly</span> : null}
-        {node.ref ? (
-          <span>
-            {' '}
-            reference <code>{node.ref}</code>
-          </span>
-        ) : null}
-      </summary>
+function SchemaTreeNodeView({ node, depth = 0 }: { node: SchemaTreeNode; depth?: number }) {
+  const hasChildren = node.children.length > 0;
+  const hasExample = node.example !== undefined && !hasChildren;
+  const inlineExample = hasExample && isPrimitiveValue(node.example);
+
+  const head = (
+    <>
+      <code>{node.name}</code> {node.type ? <span>{node.type}</span> : null}
+      {node.format ? <span> ({node.format})</span> : null}
+      {node.required ? <strong> required</strong> : null}
+      {node.deprecated ? <strong> deprecated</strong> : null}
+      {node.readOnly ? <span> readOnly</span> : null}
+      {node.writeOnly ? <span> writeOnly</span> : null}
+      {node.ref ? (
+        <span>
+          {' '}
+          reference <code>{node.ref}</code>
+        </span>
+      ) : null}
+      {inlineExample ? (
+        <span className="bov-schema-example-inline">
+          <span aria-hidden="true"> · </span>
+          <code>{JSON.stringify(node.example)}</code>
+        </span>
+      ) : null}
+    </>
+  );
+
+  const body = (
+    <>
       {node.description ? <MarkdownText value={node.description} /> : null}
       {node.enumValues?.length ? (
         <p>
           Enum: <code>{node.enumValues.map((value) => JSON.stringify(value)).join(', ')}</code>
         </p>
       ) : null}
-      {node.example !== undefined && !node.children.length ? (
-        <details>
-          <summary>Example</summary>
+      {hasExample && !inlineExample ? (
+        <div className="bov-schema-example-block">
+          <span className="bov-schema-example-label">Example</span>
           <UnknownValue value={node.example} />
-        </details>
+        </div>
       ) : null}
-      {node.children.length ? (
+      {hasChildren ? (
         <ul>
           {node.children.map((child) => (
             <li key={child.id}>
-              <SchemaTreeNodeView node={child} />
+              <SchemaTreeNodeView node={child} depth={depth + 1} />
             </li>
           ))}
         </ul>
       ) : null}
+    </>
+  );
+
+  if (!hasChildren) {
+    return (
+      <div className="bov-schema-leaf">
+        <div className="bov-schema-leaf-head">{head}</div>
+        {body}
+      </div>
+    );
+  }
+
+  return (
+    <details open={depth < 2}>
+      <summary>{head}</summary>
+      {body}
     </details>
   );
+}
+
+function isPrimitiveValue(value: unknown): boolean {
+  return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean';
 }
 
 function Callbacks({ operation, document }: { operation: NormalizedOperation; document: OpenAPIObject }) {
@@ -946,65 +1046,65 @@ function PathItemSummary({ pathItem }: { pathItem: PathItemObject }) {
   );
 }
 
-function AuthorizePanel({
-  credentials,
-  onChange,
-  persistAuthorization,
-  schemes,
+function ActiveServerPanel({
+  servers,
+  activeServerId,
+  onSetActive,
+  onOpenServerSettings,
+  schemeCount,
 }: {
-  credentials: TryItOutAuthCredentials;
-  onChange: (credentials: TryItOutAuthCredentials) => void;
-  persistAuthorization: boolean;
-  schemes: Record<string, SecuritySchemeObject>;
+  servers: SavedServer[];
+  activeServerId: string | null;
+  onSetActive: (id: string) => void;
+  onOpenServerSettings: () => void;
+  schemeCount: number;
 }) {
-  const schemeEntries = Object.entries(schemes);
-  const credentialCount = Object.values(credentials).filter(Boolean).length;
-
-  const updateCredential = (schemeName: string, credential: SecurityCredential | undefined) => {
-    const next = { ...credentials };
-
-    if (isEmptyCredential(credential)) {
-      delete next[schemeName];
-    } else {
-      next[schemeName] = credential;
-    }
-
-    onChange(next);
-  };
-
-  const clearAll = () => onChange({});
+  const active = servers.find((server) => server.id === activeServerId) ?? servers[0] ?? null;
+  const credentialCount = active ? Object.values(active.credentials).filter(Boolean).length : 0;
 
   return (
-    <section className="bov-panel bov-authorize" aria-labelledby="authorize-heading">
+    <section className="bov-panel bov-active-server" aria-labelledby="active-server-heading">
       <div className="bov-section-heading">
-        <h2 id="authorize-heading">Authorize</h2>
+        <h2 id="active-server-heading">Server</h2>
         <span>
-          {credentialCount}/{schemeEntries.length}
+          {credentialCount}/{schemeCount} auth
         </span>
       </div>
-      {schemeEntries.length ? (
-        <details>
-          <summary>
-            Credentials configured for {credentialCount} of {schemeEntries.length} security schemes
-          </summary>
-          {persistAuthorization ? <p className="bov-muted">Credentials are stored in localStorage for this API document.</p> : null}
-          <div role="group" aria-labelledby="authorize-heading">
-            {schemeEntries.map(([schemeName, scheme]) => (
-              <SecuritySchemeCredentialField
-                key={schemeName}
-                credential={credentials[schemeName]}
-                name={schemeName}
-                onChange={(credential) => updateCredential(schemeName, credential)}
-                scheme={scheme}
-              />
-            ))}
+      {servers.length ? (
+        <>
+          <div className="bov-select-wrap">
+            <select
+              className="bov-active-server-select"
+              value={active?.id ?? ''}
+              onChange={(event) => {
+                const value = event.currentTarget.value;
+                if (value === '__manage__') {
+                  onOpenServerSettings();
+                  return;
+                }
+                onSetActive(value);
+              }}
+              aria-label="Active server"
+            >
+              {servers.map((server) => (
+                <option key={server.id} value={server.id}>
+                  {server.label}
+                </option>
+              ))}
+              <option disabled>──────────</option>
+              <option value="__manage__">Manage servers & credentials…</option>
+            </select>
           </div>
-          <button className="bov-button bov-button-quiet" type="button" onClick={clearAll} disabled={!credentialCount}>
-            Clear all credentials
-          </button>
-        </details>
+          {active ? (
+            <p className="bov-muted bov-active-server-url">
+              <code>{active.url || '(relative URL)'}</code>
+            </p>
+          ) : null}
+        </>
       ) : (
-        <p className="bov-muted">No supported security schemes found.</p>
+        <button type="button" className="bov-button bov-button-quiet" onClick={onOpenServerSettings}>
+          Add a server
+        </button>
       )}
     </section>
   );
@@ -1172,29 +1272,50 @@ type TryItOutState = {
 type SnippetLanguage = TryItOutRequestSnippetLanguage;
 
 function TryItOut({
-  authCredentials,
+  servers,
+  activeServer,
+  activeServerCookies,
+  onSetActiveServer,
+  onCookiesChange,
+  onOpenSettings,
   displayRequestDuration,
   globallyEnabled,
   operation,
   document,
 }: {
-  authCredentials: TryItOutAuthCredentials;
+  servers: SavedServer[];
+  activeServer: SavedServer | null;
+  activeServerCookies: SavedCookie[];
+  onSetActiveServer: (id: string) => void;
+  onCookiesChange: (updater: (prev: SavedCookie[]) => SavedCookie[]) => void;
+  onOpenSettings: (tab?: SettingsTab) => void;
   displayRequestDuration: boolean;
   globallyEnabled: boolean;
   operation: NormalizedOperation;
   document: OpenAPIObject;
 }) {
-  const initialState = useMemo(() => createTryItOutState(operation), [operation]);
+  const initialState = useMemo(() => createTryItOutState(operation, activeServer), [operation, activeServer?.id]);
   const [state, setState] = useState<TryItOutState>(initialState);
+
+  useEffect(() => {
+    setState((current) => ({
+      ...current,
+      serverUrl: activeServer?.url ?? '',
+      serverVariables: activeServer?.variables ?? {},
+    }));
+  }, [activeServer?.id, activeServer?.url, activeServer?.variables]);
+
+  const authCredentials = activeServer?.credentials ?? {};
+  const cookieHeader = useMemo(() => formatCookieHeader(activeServerCookies), [activeServerCookies]);
   const abortControllerRef = useRef<AbortController | undefined>(undefined);
   const parameterFields = useMemo(() => operation.parameters.filter((parameter): parameter is ParameterObject => !isReferenceObject(parameter)), [operation.parameters]);
   const request = useMemo(
-    () => buildTryItOutRequestForState({ authCredentials, document, operation, state }),
-    [authCredentials, document, operation, state.bodyFormat, state.bodyText, state.contentType, state.parameters, state.serverUrl, state.serverVariables],
+    () => buildTryItOutRequestForState({ authCredentials, cookieHeader, document, operation, state }),
+    [authCredentials, cookieHeader, document, operation, state.bodyFormat, state.bodyText, state.contentType, state.parameters, state.serverUrl, state.serverVariables],
   );
-  const selectedServer = useMemo(() => getServerOptions(operation).find((server) => server.url === state.serverUrl) ?? getServerOptions(operation)[0], [operation, state.serverUrl]);
   const requestBodySchema = getRequestBodyMediaTypes(operation)[state.contentType]?.schema;
   const validationMessages = useMemo(() => validateTryItOutState(operation, state), [operation, state]);
+  const requestOrigin = useMemo(() => getRequestOrigin(request.url), [request.url]);
 
   const updateParameter = (name: string, value: string) => {
     setState((current) => ({ ...current, parameters: { ...current.parameters, [name]: value } }));
@@ -1219,6 +1340,7 @@ function TryItOut({
         headers: isMultipartContentType(state.contentType) ? getHeadersWithoutContentType(request.headers) : request.headers,
         body: isMultipartContentType(state.contentType) ? buildMultipartFormData(state) : request.body,
         signal: abortController.signal,
+        credentials: 'omit',
       });
       const body = await response.text();
       const durationMs = Math.round(performance.now() - startedAt);
@@ -1228,6 +1350,15 @@ function TryItOut({
       }
 
       abortControllerRef.current = undefined;
+
+      const setCookies = getSetCookieHeaders(response.headers);
+      if (setCookies.length) {
+        const parsed = setCookies.map(parseSetCookieHeader).filter((value): value is ParsedSetCookie => Boolean(value));
+        if (parsed.length) {
+          onCookiesChange((prev) => parsed.reduce(mergeSetCookieIntoJar, prev));
+        }
+      }
+
       setState((current) => ({
         ...current,
         isSending: false,
@@ -1272,20 +1403,28 @@ function TryItOut({
             <label>
               Server
               <select
-                value={state.serverUrl}
-                onChange={(event) => {
-                  const serverUrl = event.currentTarget.value;
-                  const server = getServerOptions(operation).find((option) => option.url === serverUrl);
-                  setState((current) => ({ ...current, serverUrl, serverVariables: createInitialServerVariables(server) }));
-                }}
+                value={activeServer?.id ?? ''}
+                onChange={(event) => onSetActiveServer(event.currentTarget.value)}
               >
-                {getServerOptions(operation).map((server) => (
-                  <option key={server.url} value={server.url}>
-                    {server.description ? `${server.url} - ${server.description}` : server.url}
+                {servers.map((server) => (
+                  <option key={server.id} value={server.id}>
+                    {server.label}{server.url ? ` — ${server.url}` : ''}
                   </option>
                 ))}
               </select>
             </label>
+            <p className="bov-pref-help">
+              Manage servers, variables, and credentials in{' '}
+              <button type="button" className="bov-link-button" onClick={() => onOpenSettings('servers')}>
+                Settings → Servers
+              </button>
+              .
+            </p>
+            {operation.servers.length ? (
+              <p className="bov-pref-help">
+                This operation defines its own servers in the spec ({operation.servers.map((s) => s.url).join(', ')}). Try-it-out uses the active server above.
+              </p>
+            ) : null}
             {getRequestBodyContentTypes(operation).length ? (
               <label>
                 Content type
@@ -1313,35 +1452,15 @@ function TryItOut({
                 </select>
               </label>
             ) : null}
-            {selectedServer?.variables ? (
-              <fieldset>
-                <legend>Server variables</legend>
-                {Object.entries(selectedServer.variables).map(([name, variable]) => (
-                  <label key={name}>
-                    {name}
-                    {variable.enum?.length ? (
-                      <select
-                        value={state.serverVariables[name] ?? String(variable.default ?? '')}
-                        onChange={(event) => setState((current) => ({ ...current, serverVariables: { ...current.serverVariables, [name]: event.currentTarget.value } }))}
-                      >
-                        {variable.enum.map((value) => (
-                          <option key={String(value)} value={String(value)}>
-                            {String(value)}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <input
-                        value={state.serverVariables[name] ?? String(variable.default ?? '')}
-                        onChange={(event) => setState((current) => ({ ...current, serverVariables: { ...current.serverVariables, [name]: event.currentTarget.value } }))}
-                      />
-                    )}
-                    {variable.description ? <MarkdownText value={variable.description} /> : null}
-                  </label>
-                ))}
-              </fieldset>
-            ) : null}
           </fieldset>
+
+          <ActiveCookiesPanel
+            cookies={activeServerCookies}
+            origin={requestOrigin}
+            serverLabel={activeServer?.label ?? ''}
+            onChange={onCookiesChange}
+            onOpenSettings={() => onOpenSettings('cookies')}
+          />
 
           <fieldset>
             <legend>Parameters</legend>
@@ -1412,7 +1531,7 @@ function TryItOut({
             <button className="bov-button" type="button" onClick={cancelRequest} disabled={!state.isSending}>
               Cancel request
             </button>
-            <button className="bov-button bov-button-quiet" type="button" onClick={() => setState({ ...createTryItOutState(operation), enabled: true })}>
+            <button className="bov-button bov-button-quiet" type="button" onClick={() => setState({ ...createTryItOutState(operation, activeServer), enabled: true })}>
               Reset inputs
             </button>
           </div>
@@ -2138,13 +2257,13 @@ function isPathItemObject(value: unknown): value is PathItemObject {
   return isRecord(value) && ('$ref' in value || 'summary' in value || 'description' in value || HTTP_METHODS.some((method) => method in value));
 }
 
-function createTryItOutState(operation: NormalizedOperation): TryItOutState {
+function createTryItOutState(operation: NormalizedOperation, activeServer: SavedServer | null): TryItOutState {
   const contentType = getRequestBodyContentTypes(operation)[0] ?? '';
 
   return {
     enabled: true,
-    serverUrl: getServerOptions(operation)[0]?.url ?? '',
-    serverVariables: createInitialServerVariables(getServerOptions(operation)[0]),
+    serverUrl: activeServer?.url ?? getServerOptions(operation)[0]?.url ?? '',
+    serverVariables: activeServer?.variables ?? createInitialServerVariables(getServerOptions(operation)[0]),
     contentType,
     parameters: Object.fromEntries(
       operation.parameters
@@ -2163,16 +2282,18 @@ function createTryItOutState(operation: NormalizedOperation): TryItOutState {
 
 function buildTryItOutRequestForState({
   authCredentials,
+  cookieHeader,
   document,
   operation,
   state,
 }: {
   authCredentials: TryItOutAuthCredentials;
+  cookieHeader?: string;
   document: OpenAPIObject;
   operation: NormalizedOperation;
   state: TryItOutState;
 }) {
-  return buildTryItOutRequest({
+  const built = buildTryItOutRequest({
     document,
     operation,
     serverUrl: state.serverUrl,
@@ -2183,6 +2304,19 @@ function buildTryItOutRequestForState({
     auth: authCredentials,
     securitySchemes: getTryItOutSecuritySchemes(document),
   });
+
+  if (cookieHeader) {
+    const existing = built.headers.Cookie ?? built.headers.cookie;
+    return {
+      ...built,
+      headers: {
+        ...built.headers,
+        Cookie: existing ? `${existing}; ${cookieHeader}` : cookieHeader,
+      },
+    };
+  }
+
+  return built;
 }
 
 function createInitialServerVariables(server: ServerObject | undefined): Record<string, string> {
@@ -2518,11 +2652,13 @@ function ModalShell({
   labelledBy,
   onClose,
   dismissible = true,
+  className,
 }: {
   children: ReactNode;
   labelledBy: string;
   onClose?: () => void;
   dismissible?: boolean;
+  className?: string;
 }) {
   useEffect(() => {
     if (!dismissible || !onClose) return;
@@ -2536,7 +2672,7 @@ function ModalShell({
   return (
     <div className="bov-modal-overlay" role="presentation" onClick={dismissible ? onClose : undefined}>
       <div
-        className="bov-modal"
+        className={className ? `bov-modal ${className}` : 'bov-modal'}
         role="dialog"
         aria-modal="true"
         aria-labelledby={labelledBy}
@@ -2548,83 +2684,519 @@ function ModalShell({
   );
 }
 
+type SettingsTab = 'appearance' | 'servers' | 'cookies';
+
+const SETTINGS_TABS: Array<{ id: SettingsTab; label: string }> = [
+  { id: 'appearance', label: 'Appearance' },
+  { id: 'servers', label: 'Servers' },
+  { id: 'cookies', label: 'Cookies' },
+];
+
 function SettingsModal({
+  activeTab,
+  onTabChange,
+  preferences,
+  onChangePreferences,
+  onClose,
+  serversState,
+  onSetActiveServer,
+  onUpsertServer,
+  onRemoveServer,
+  cookiesByServer,
+  onSetCookiesForServer,
+  schemes,
+}: {
+  activeTab: SettingsTab;
+  onTabChange: (tab: SettingsTab) => void;
+  preferences: Preferences;
+  onChangePreferences: (patch: Partial<Preferences>) => void;
+  onClose: () => void;
+  serversState: SavedServersState;
+  onSetActiveServer: (id: string) => void;
+  onUpsertServer: (server: SavedServer) => void;
+  onRemoveServer: (id: string) => void;
+  cookiesByServer: Record<string, SavedCookie[]>;
+  onSetCookiesForServer: (serverId: string, updater: (prev: SavedCookie[]) => SavedCookie[]) => void;
+  schemes: Record<string, SecuritySchemeObject>;
+}) {
+  return (
+    <ModalShell labelledBy="bov-settings-title" onClose={onClose} className="bov-modal-wide">
+      <div className="bov-settings-shell">
+        <aside className="bov-settings-sidebar" aria-label="Settings sections">
+          <div className="bov-settings-sidebar-header">
+            <p className="bov-kicker">Preferences</p>
+            <h2 id="bov-settings-title">Settings</h2>
+          </div>
+          <nav>
+            {SETTINGS_TABS.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                className="bov-settings-tab"
+                data-active={activeTab === tab.id ? 'true' : 'false'}
+                onClick={() => onTabChange(tab.id)}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </nav>
+        </aside>
+        <div className="bov-settings-main">
+          <header className="bov-settings-main-header">
+            <h3>{SETTINGS_TABS.find((t) => t.id === activeTab)?.label}</h3>
+            <button type="button" className="bov-detail-close" onClick={onClose} aria-label="Close settings">
+              <span aria-hidden="true">×</span>
+            </button>
+          </header>
+          <div className="bov-settings-main-body">
+            {activeTab === 'appearance' ? (
+              <AppearanceTab preferences={preferences} onChange={onChangePreferences} />
+            ) : activeTab === 'servers' ? (
+              <ServersTab
+                serversState={serversState}
+                schemes={schemes}
+                onSetActive={onSetActiveServer}
+                onUpsertServer={onUpsertServer}
+                onRemoveServer={onRemoveServer}
+              />
+            ) : (
+              <CookiesTab
+                serversState={serversState}
+                cookiesByServer={cookiesByServer}
+                onSetCookiesForServer={onSetCookiesForServer}
+              />
+            )}
+          </div>
+        </div>
+      </div>
+    </ModalShell>
+  );
+}
+
+function AppearanceTab({
   preferences,
   onChange,
-  onClose,
 }: {
   preferences: Preferences;
   onChange: (patch: Partial<Preferences>) => void;
-  onClose: () => void;
 }) {
   return (
-    <ModalShell labelledBy="bov-settings-title" onClose={onClose}>
-      <header className="bov-modal-header">
-        <div>
-          <p className="bov-kicker">Preferences</p>
-          <h2 id="bov-settings-title">Settings</h2>
+    <div className="bov-settings-section">
+      <fieldset className="bov-pref-group">
+        <legend>Theme</legend>
+        <div className="bov-segmented">
+          <label>
+            <input
+              type="radio"
+              name="bov-pref-theme"
+              checked={preferences.theme === 'light'}
+              onChange={() => onChange({ theme: 'light' })}
+            />
+            <span>Light</span>
+          </label>
+          <label>
+            <input
+              type="radio"
+              name="bov-pref-theme"
+              checked={preferences.theme === 'dark'}
+              onChange={() => onChange({ theme: 'dark' })}
+            />
+            <span>Dark</span>
+          </label>
         </div>
-        <button type="button" className="bov-detail-close" onClick={onClose} aria-label="Close settings">
-          <span aria-hidden="true">×</span>
-        </button>
-      </header>
-      <div className="bov-modal-body">
-        <fieldset className="bov-pref-group">
-          <legend>Theme</legend>
-          <div className="bov-segmented">
-            <label>
-              <input
-                type="radio"
-                name="bov-pref-theme"
-                checked={preferences.theme === 'light'}
-                onChange={() => onChange({ theme: 'light' })}
-              />
-              <span>Light</span>
-            </label>
-            <label>
-              <input
-                type="radio"
-                name="bov-pref-theme"
-                checked={preferences.theme === 'dark'}
-                onChange={() => onChange({ theme: 'dark' })}
-              />
-              <span>Dark</span>
-            </label>
-          </div>
-        </fieldset>
-        <fieldset className="bov-pref-group">
-          <legend>Environment scope</legend>
-          <p className="bov-pref-help">
-            Where saved servers, variables, and Try-it-out values are kept.
-          </p>
-          <div className="bov-segmented">
-            <label>
-              <input
-                type="radio"
-                name="bov-pref-env-scope"
-                checked={preferences.envScope === 'per-spec'}
-                onChange={() => onChange({ envScope: 'per-spec' })}
-              />
-              <span>Per spec</span>
-            </label>
-            <label>
-              <input
-                type="radio"
-                name="bov-pref-env-scope"
-                checked={preferences.envScope === 'global'}
-                onChange={() => onChange({ envScope: 'global' })}
-              />
-              <span>Global</span>
-            </label>
-          </div>
-        </fieldset>
+      </fieldset>
+      <fieldset className="bov-pref-group">
+        <legend>Environment scope</legend>
+        <p className="bov-pref-help">Where saved servers, variables, and Try-it-out values are kept.</p>
+        <div className="bov-segmented">
+          <label>
+            <input
+              type="radio"
+              name="bov-pref-env-scope"
+              checked={preferences.envScope === 'per-spec'}
+              onChange={() => onChange({ envScope: 'per-spec' })}
+            />
+            <span>Per spec</span>
+          </label>
+          <label>
+            <input
+              type="radio"
+              name="bov-pref-env-scope"
+              checked={preferences.envScope === 'global'}
+              onChange={() => onChange({ envScope: 'global' })}
+            />
+            <span>Global</span>
+          </label>
+        </div>
+      </fieldset>
+    </div>
+  );
+}
+
+function ServersTab({
+  serversState,
+  schemes,
+  onSetActive,
+  onUpsertServer,
+  onRemoveServer,
+}: {
+  serversState: SavedServersState;
+  schemes: Record<string, SecuritySchemeObject>;
+  onSetActive: (id: string) => void;
+  onUpsertServer: (server: SavedServer) => void;
+  onRemoveServer: (id: string) => void;
+}) {
+  const fallbackId = serversState.activeId ?? serversState.servers[0]?.id ?? null;
+  const [selectedId, setSelectedId] = useState<string | null>(fallbackId);
+  const selected = serversState.servers.find((server) => server.id === selectedId) ?? null;
+
+  const addServer = () => {
+    const id = `user-${generateId()}`;
+    const newServer: SavedServer = {
+      id,
+      label: 'New server',
+      url: 'https://api.example.com',
+      variables: {},
+      credentials: {},
+      source: 'user',
+    };
+    onUpsertServer(newServer);
+    setSelectedId(id);
+  };
+
+  return (
+    <div className="bov-settings-section bov-servers-tab">
+      <div className="bov-servers-list">
+        <div className="bov-servers-list-header">
+          <h4>All servers</h4>
+          <button type="button" className="bov-button bov-button-quiet" onClick={addServer}>
+            + Add
+          </button>
+        </div>
+        <ul role="list">
+          {serversState.servers.map((server) => (
+            <li key={server.id}>
+              <button
+                type="button"
+                className="bov-servers-list-item"
+                data-active={selectedId === server.id ? 'true' : 'false'}
+                onClick={() => setSelectedId(server.id)}
+              >
+                <div className="bov-servers-list-item-main">
+                  <strong>{server.label}</strong>
+                  <code>{server.url || '(relative)'}</code>
+                </div>
+                <div className="bov-servers-list-item-meta">
+                  {serversState.activeId === server.id ? <span className="bov-pill bov-pill-active">Active</span> : null}
+                  <span className="bov-faint-text">{server.source}</span>
+                </div>
+              </button>
+            </li>
+          ))}
+        </ul>
       </div>
-      <footer className="bov-modal-footer">
-        <button type="button" className="bov-button bov-button-primary" onClick={onClose}>
-          Done
+      <div className="bov-servers-detail">
+        {selected ? (
+          <ServerForm
+            key={selected.id}
+            server={selected}
+            schemes={schemes}
+            isActive={serversState.activeId === selected.id}
+            onChange={(server) => onUpsertServer(server)}
+            onSetActive={() => onSetActive(selected.id)}
+            onRemove={() => {
+              onRemoveServer(selected.id);
+              setSelectedId(null);
+            }}
+          />
+        ) : (
+          <p className="bov-muted">Pick a server on the left, or add a new one.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ServerForm({
+  server,
+  schemes,
+  isActive,
+  onChange,
+  onSetActive,
+  onRemove,
+}: {
+  server: SavedServer;
+  schemes: Record<string, SecuritySchemeObject>;
+  isActive: boolean;
+  onChange: (server: SavedServer) => void;
+  onSetActive: () => void;
+  onRemove: () => void;
+}) {
+  const variableNames = useMemo(() => extractServerVariableNames(server.url), [server.url]);
+  const schemeEntries = Object.entries(schemes);
+
+  const updateField = <K extends keyof SavedServer>(field: K, value: SavedServer[K]) => {
+    onChange({ ...server, [field]: value });
+  };
+
+  const updateCredential = (schemeName: string, credential: SecurityCredential | undefined) => {
+    const next = { ...server.credentials };
+    if (isEmptyCredential(credential)) {
+      delete next[schemeName];
+    } else {
+      next[schemeName] = credential;
+    }
+    onChange({ ...server, credentials: next });
+  };
+
+  return (
+    <div className="bov-server-form">
+      <header className="bov-server-form-header">
+        <div>
+          <input
+            className="bov-server-form-label"
+            value={server.label}
+            onChange={(event) => updateField('label', event.currentTarget.value)}
+            placeholder="Server label"
+          />
+          <p className="bov-faint-text bov-server-form-id">id: {server.id}</p>
+        </div>
+        <div className="bov-server-form-actions">
+          {isActive ? (
+            <span className="bov-pill bov-pill-active">Active</span>
+          ) : (
+            <button type="button" className="bov-button" onClick={onSetActive}>
+              Set active
+            </button>
+          )}
+          {server.source === 'user' ? (
+            <button type="button" className="bov-button bov-button-quiet" onClick={onRemove}>
+              Remove
+            </button>
+          ) : null}
+        </div>
+      </header>
+
+      <fieldset className="bov-pref-group">
+        <legend>Base URL</legend>
+        <input
+          value={server.url}
+          onChange={(event) => updateField('url', event.currentTarget.value)}
+          placeholder="https://api.example.com"
+        />
+        <p className="bov-pref-help">Use <code>{'{name}'}</code> to define variables.</p>
+      </fieldset>
+
+      {variableNames.length ? (
+        <fieldset className="bov-pref-group">
+          <legend>Variables</legend>
+          {variableNames.map((name) => (
+            <label key={name} className="bov-server-form-row">
+              <span>{name}</span>
+              <input
+                value={server.variables[name] ?? ''}
+                onChange={(event) =>
+                  updateField('variables', { ...server.variables, [name]: event.currentTarget.value })
+                }
+                placeholder={`Value for {${name}}`}
+              />
+            </label>
+          ))}
+        </fieldset>
+      ) : null}
+
+      <fieldset className="bov-pref-group">
+        <legend>Credentials</legend>
+        {schemeEntries.length ? (
+          <div className="bov-server-form-credentials">
+            {schemeEntries.map(([schemeName, scheme]) => (
+              <SecuritySchemeCredentialField
+                key={schemeName}
+                credential={server.credentials[schemeName]}
+                name={schemeName}
+                onChange={(credential) => updateCredential(schemeName, credential)}
+                scheme={scheme}
+              />
+            ))}
+          </div>
+        ) : (
+          <p className="bov-muted">No supported security schemes in this spec.</p>
+        )}
+      </fieldset>
+    </div>
+  );
+}
+
+function CookiesTab({
+  serversState,
+  cookiesByServer,
+  onSetCookiesForServer,
+}: {
+  serversState: SavedServersState;
+  cookiesByServer: Record<string, SavedCookie[]>;
+  onSetCookiesForServer: (serverId: string, updater: (prev: SavedCookie[]) => SavedCookie[]) => void;
+}) {
+  const [selectedId, setSelectedId] = useState<string | null>(serversState.activeId ?? serversState.servers[0]?.id ?? null);
+  const selected = serversState.servers.find((server) => server.id === selectedId) ?? null;
+  const cookies = selected ? cookiesByServer[selected.id] ?? [] : [];
+
+  const addCookie = () => {
+    if (!selected) return;
+    const cookie: SavedCookie = { id: generateId(), name: '', value: '' };
+    onSetCookiesForServer(selected.id, (prev) => [...prev, cookie]);
+  };
+
+  return (
+    <div className="bov-settings-section bov-cookies-tab">
+      <fieldset className="bov-pref-group">
+        <legend>Server</legend>
+        <select
+          value={selectedId ?? ''}
+          onChange={(event) => setSelectedId(event.currentTarget.value)}
+        >
+          {serversState.servers.map((server) => (
+            <option key={server.id} value={server.id}>
+              {server.label}
+            </option>
+          ))}
+        </select>
+        <p className="bov-pref-help">
+          Cookies are stored per server. The viewer attaches them as a <code>Cookie</code> header on Try-it-out requests; <code>Set-Cookie</code> headers from responses are merged back when CORS exposes them.
+        </p>
+      </fieldset>
+
+      <div className="bov-cookies-list-header">
+        <h4>Cookies for {selected?.label ?? '—'}</h4>
+        <button type="button" className="bov-button bov-button-quiet" onClick={addCookie} disabled={!selected}>
+          + Add cookie
         </button>
-      </footer>
-    </ModalShell>
+      </div>
+
+      {cookies.length ? (
+        <ul className="bov-cookies-list" role="list">
+          {cookies.map((cookie) => (
+            <li key={cookie.id}>
+              <CookieEditor
+                cookie={cookie}
+                onChange={(next) =>
+                  selected && onSetCookiesForServer(selected.id, (prev) => prev.map((c) => (c.id === cookie.id ? next : c)))
+                }
+                onRemove={() =>
+                  selected && onSetCookiesForServer(selected.id, (prev) => prev.filter((c) => c.id !== cookie.id))
+                }
+              />
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="bov-muted">No cookies set for this server yet.</p>
+      )}
+    </div>
+  );
+}
+
+function CookieEditor({
+  cookie,
+  onChange,
+  onRemove,
+}: {
+  cookie: SavedCookie;
+  onChange: (cookie: SavedCookie) => void;
+  onRemove: () => void;
+}) {
+  return (
+    <div className="bov-cookie-editor">
+      <div className="bov-cookie-editor-row">
+        <label>
+          <span>Name</span>
+          <input
+            value={cookie.name}
+            onChange={(event) => onChange({ ...cookie, name: event.currentTarget.value })}
+            placeholder="session_id"
+          />
+        </label>
+        <label>
+          <span>Value</span>
+          <input
+            value={cookie.value}
+            onChange={(event) => onChange({ ...cookie, value: event.currentTarget.value })}
+          />
+        </label>
+      </div>
+      <div className="bov-cookie-editor-row">
+        <label>
+          <span>Path</span>
+          <input
+            value={cookie.path ?? ''}
+            onChange={(event) => onChange({ ...cookie, path: event.currentTarget.value || undefined })}
+            placeholder="/"
+          />
+        </label>
+        <label>
+          <span>Expires</span>
+          <input
+            type="text"
+            value={cookie.expires ?? ''}
+            onChange={(event) => onChange({ ...cookie, expires: event.currentTarget.value || undefined })}
+            placeholder="(session)"
+          />
+        </label>
+      </div>
+      <div className="bov-cookie-editor-actions">
+        <button type="button" className="bov-button bov-button-quiet" onClick={onRemove}>
+          Delete
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ActiveCookiesPanel({
+  cookies,
+  origin,
+  serverLabel,
+  onChange,
+  onOpenSettings,
+}: {
+  cookies: SavedCookie[];
+  origin: string | null;
+  serverLabel: string;
+  onChange: (updater: (prev: SavedCookie[]) => SavedCookie[]) => void;
+  onOpenSettings: () => void;
+}) {
+  const live = cookies.filter((cookie) => !cookie.expires || new Date(cookie.expires).getTime() > Date.now());
+
+  return (
+    <details className="bov-active-cookies">
+      <summary>
+        Cookies for {serverLabel || 'active server'} ({live.length})
+        {origin ? <span className="bov-faint-text"> · sent to {origin}</span> : null}
+      </summary>
+      {live.length ? (
+        <ul role="list" className="bov-active-cookies-list">
+          {live.map((cookie) => (
+            <li key={cookie.id}>
+              <code>{cookie.name || '(unnamed)'}</code>
+              <span className="bov-faint-text">=</span>
+              <span className="bov-active-cookies-value">{cookie.value}</span>
+              <button
+                type="button"
+                className="bov-button bov-button-quiet"
+                onClick={() => onChange((prev) => prev.filter((c) => c.id !== cookie.id))}
+                aria-label={`Delete cookie ${cookie.name}`}
+              >
+                Delete
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="bov-muted">No cookies will be sent.</p>
+      )}
+      <button type="button" className="bov-link-button" onClick={onOpenSettings}>
+        Manage cookies in Settings
+      </button>
+    </details>
   );
 }
 
@@ -2686,6 +3258,38 @@ function OnboardingModal({
   );
 }
 
+type SavedServer = {
+  id: string;
+  label: string;
+  url: string;
+  variables: Record<string, string>;
+  credentials: TryItOutAuthCredentials;
+  source: 'spec' | 'user';
+};
+
+type SavedServersState = {
+  servers: SavedServer[];
+  activeId: string | null;
+};
+
+type SavedCookie = {
+  id: string;
+  name: string;
+  value: string;
+  path?: string;
+  expires?: string;
+};
+
+type ParsedSetCookie = { name: string; value: string; path?: string; expires?: string };
+
+function generateId() {
+  return Math.random().toString(36).slice(2, 10);
+}
+
+function getSpecKey(document: OpenAPIObject) {
+  return `${document.info?.title ?? 'OpenAPI'}:${document.info?.version ?? ''}`;
+}
+
 function readPersistedAuthCredentials(document: OpenAPIObject): TryItOutAuthCredentials {
   if (typeof window === 'undefined') {
     return {};
@@ -2699,26 +3303,232 @@ function readPersistedAuthCredentials(document: OpenAPIObject): TryItOutAuthCred
   }
 }
 
-function writePersistedAuthCredentials(document: OpenAPIObject, credentials: TryItOutAuthCredentials) {
-  if (typeof window === 'undefined') {
-    return;
-  }
+function getAuthStorageKey(document: OpenAPIObject) {
+  return `better-openapi-viewer:auth:${getSpecKey(document)}`;
+}
 
+function getServersStorageKey(document: OpenAPIObject) {
+  return `better-openapi-viewer:servers:${getSpecKey(document)}`;
+}
+
+function getCookiesStorageKey(document: OpenAPIObject, serverId: string) {
+  return `better-openapi-viewer:cookies:${getSpecKey(document)}:${serverId}`;
+}
+
+function readPersistedServers(document: OpenAPIObject): SavedServersState | null {
+  if (typeof window === 'undefined') return null;
   try {
-    const storageKey = getAuthStorageKey(document);
-
-    if (Object.values(credentials).some(Boolean)) {
-      window.localStorage.setItem(storageKey, JSON.stringify(credentials));
-    } else {
-      window.localStorage.removeItem(storageKey);
-    }
+    const raw = window.localStorage.getItem(getServersStorageKey(document));
+    return raw ? (JSON.parse(raw) as SavedServersState) : null;
   } catch {
-    // Ignore storage failures so private browsing or restricted storage cannot block requests.
+    return null;
   }
 }
 
-function getAuthStorageKey(document: OpenAPIObject) {
-  return `better-openapi-viewer:auth:${document.info?.title ?? 'OpenAPI'}:${document.info?.version ?? ''}`;
+function writePersistedServers(document: OpenAPIObject, state: SavedServersState) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(getServersStorageKey(document), JSON.stringify(state));
+  } catch {
+    // ignore
+  }
+}
+
+function buildInitialServersState(
+  document: OpenAPIObject,
+  preauthorized: TryItOutAuthCredentials,
+): SavedServersState {
+  const specServers: ServerObject[] = (document.servers && document.servers.length
+    ? document.servers
+    : [{ url: '', description: 'Default' }]) as ServerObject[];
+  const servers: SavedServer[] = specServers.map((spec, index) => ({
+    id: `spec-${index}`,
+    label: spec.description ?? (spec.url || `Server ${index + 1}`),
+    url: spec.url,
+    variables: createInitialServerVariables(spec),
+    credentials: index === 0 ? { ...preauthorized } : {},
+    source: 'spec',
+  }));
+  return { servers, activeId: servers[0]?.id ?? null };
+}
+
+function useSavedServers(document: OpenAPIObject, preauthorized: TryItOutAuthCredentials) {
+  const [state, setState] = useState<SavedServersState>(
+    () => readPersistedServers(document) ?? buildInitialServersState(document, preauthorized),
+  );
+
+  const apply = useCallback(
+    (updater: (prev: SavedServersState) => SavedServersState) => {
+      setState((prev) => {
+        const next = updater(prev);
+        writePersistedServers(document, next);
+        return next;
+      });
+    },
+    [document],
+  );
+
+  const setActive = useCallback(
+    (id: string) => apply((prev) => (prev.activeId === id ? prev : { ...prev, activeId: id })),
+    [apply],
+  );
+
+  const upsertServer = useCallback(
+    (server: SavedServer) =>
+      apply((prev) => {
+        const exists = prev.servers.some((s) => s.id === server.id);
+        const servers = exists
+          ? prev.servers.map((s) => (s.id === server.id ? server : s))
+          : [...prev.servers, server];
+        const activeId = prev.activeId ?? server.id;
+        return { servers, activeId };
+      }),
+    [apply],
+  );
+
+  const removeServer = useCallback(
+    (id: string) =>
+      apply((prev) => {
+        const servers = prev.servers.filter((s) => s.id !== id);
+        const activeId = prev.activeId === id ? servers[0]?.id ?? null : prev.activeId;
+        return { servers, activeId };
+      }),
+    [apply],
+  );
+
+  return { state, setActive, upsertServer, removeServer };
+}
+
+function readPersistedCookies(document: OpenAPIObject, serverId: string): SavedCookie[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(getCookiesStorageKey(document, serverId));
+    return raw ? (JSON.parse(raw) as SavedCookie[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writePersistedCookies(document: OpenAPIObject, serverId: string, cookies: SavedCookie[]) {
+  if (typeof window === 'undefined') return;
+  try {
+    if (cookies.length) {
+      window.localStorage.setItem(getCookiesStorageKey(document, serverId), JSON.stringify(cookies));
+    } else {
+      window.localStorage.removeItem(getCookiesStorageKey(document, serverId));
+    }
+  } catch {
+    // ignore
+  }
+}
+
+function useCookieStore(document: OpenAPIObject, servers: SavedServer[]) {
+  const [cookiesByServer, setCookiesByServer] = useState<Record<string, SavedCookie[]>>(() => {
+    const initial: Record<string, SavedCookie[]> = {};
+    for (const server of servers) {
+      initial[server.id] = readPersistedCookies(document, server.id);
+    }
+    return initial;
+  });
+
+  useEffect(() => {
+    setCookiesByServer((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const server of servers) {
+        if (!(server.id in next)) {
+          next[server.id] = readPersistedCookies(document, server.id);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [document, servers]);
+
+  const setCookiesForServer = useCallback(
+    (serverId: string, updater: (prev: SavedCookie[]) => SavedCookie[]) => {
+      setCookiesByServer((prev) => {
+        const current = prev[serverId] ?? [];
+        const next = updater(current);
+        writePersistedCookies(document, serverId, next);
+        return { ...prev, [serverId]: next };
+      });
+    },
+    [document],
+  );
+
+  return [cookiesByServer, setCookiesForServer] as const;
+}
+
+function parseSetCookieHeader(header: string): ParsedSetCookie | null {
+  const parts = header.split(';').map((p) => p.trim()).filter(Boolean);
+  const first = parts[0];
+  if (!first) return null;
+  const equalsIndex = first.indexOf('=');
+  if (equalsIndex === -1) return null;
+  const name = first.slice(0, equalsIndex).trim();
+  const value = first.slice(equalsIndex + 1).trim();
+  if (!name) return null;
+  const result: ParsedSetCookie = { name, value };
+  for (let i = 1; i < parts.length; i++) {
+    const attr = parts[i] ?? '';
+    const eq = attr.indexOf('=');
+    const k = (eq === -1 ? attr : attr.slice(0, eq)).trim().toLowerCase();
+    const v = eq === -1 ? '' : attr.slice(eq + 1).trim();
+    if (k === 'path') result.path = v;
+    else if (k === 'expires') result.expires = v;
+    else if (k === 'max-age') {
+      const seconds = Number.parseInt(v, 10);
+      if (Number.isFinite(seconds)) {
+        result.expires = new Date(Date.now() + seconds * 1000).toISOString();
+      }
+    }
+  }
+  return result;
+}
+
+function mergeSetCookieIntoJar(jar: SavedCookie[], parsed: ParsedSetCookie): SavedCookie[] {
+  const matchPath = parsed.path ?? '/';
+  const existingIndex = jar.findIndex((c) => c.name === parsed.name && (c.path ?? '/') === matchPath);
+  if (existingIndex >= 0) {
+    return jar.map((c, i) => (i === existingIndex ? { ...c, ...parsed } : c));
+  }
+  return [...jar, { id: generateId(), ...parsed }];
+}
+
+function formatCookieHeader(cookies: SavedCookie[]): string {
+  const now = Date.now();
+  return cookies
+    .filter((c) => c.name && (!c.expires || new Date(c.expires).getTime() > now))
+    .map((c) => `${c.name}=${c.value}`)
+    .join('; ');
+}
+
+function getSetCookieHeaders(headers: Headers): string[] {
+  const anyHeaders = headers as Headers & { getSetCookie?: () => string[] };
+  if (typeof anyHeaders.getSetCookie === 'function') {
+    return anyHeaders.getSetCookie();
+  }
+  const single = headers.get('set-cookie');
+  return single ? [single] : [];
+}
+
+function getRequestOrigin(url: string): string | null {
+  try {
+    const parsed = new URL(url, typeof window === 'undefined' ? 'http://localhost' : window.location.href);
+    return parsed.origin;
+  } catch {
+    return null;
+  }
+}
+
+function extractServerVariableNames(url: string): string[] {
+  const names: string[] = [];
+  for (const match of url.matchAll(/\{([^}]+)\}/g)) {
+    const name = match[1];
+    if (name && !names.includes(name)) names.push(name);
+  }
+  return names;
 }
 
 function isRequestBodyObject(value: unknown): value is RequestBodyObject {
@@ -2747,4 +3557,9 @@ function mergeCredentials(...credentials: Array<TryItOutAuthCredentials | undefi
 
 function toDomId(value: string) {
   return value.replace(/[^a-z0-9_-]+/gi, '-');
+}
+
+function getSettingsShortcutLabel() {
+  if (typeof navigator === 'undefined') return 'Ctrl+,';
+  return /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘,' : 'Ctrl+,';
 }

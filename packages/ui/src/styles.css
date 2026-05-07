@@ -113,8 +113,7 @@
   }
 
   .bov-product {
-    @apply pb-5;
-    border-bottom: 1px solid var(--bov-line);
+    @apply pb-0;
   }
 
   .bov-kicker {
@@ -147,6 +146,7 @@
   .bov-stats {
     @apply m-0 mt-4 grid grid-cols-3 gap-0;
     border-top: 1px solid var(--bov-line);
+    border-bottom: 1px solid var(--bov-line);
   }
 
   .bov-stats > div {
@@ -563,6 +563,36 @@
     @apply mb-2;
   }
 
+  .bov-detail-stack .bov-schema-leaf {
+    @apply rounded-[6px] border p-2.5;
+    border-color: var(--bov-line);
+    background: var(--bov-surface);
+  }
+
+  .bov-schema-leaf-head {
+    @apply text-[12px] font-medium;
+    color: var(--bov-text);
+  }
+
+  .bov-schema-example-inline {
+    @apply text-[12px];
+    color: var(--bov-muted);
+  }
+
+  .bov-schema-example-inline code {
+    color: var(--bov-text);
+  }
+
+  .bov-schema-example-block {
+    @apply mt-2 grid gap-1;
+  }
+
+  .bov-schema-example-label {
+    @apply text-[9px] font-semibold uppercase;
+    letter-spacing: 0.16em;
+    color: var(--bov-faint);
+  }
+
   .bov-detail-stack fieldset {
     @apply m-0 grid gap-2 rounded-[6px] border p-3;
     border-color: var(--bov-line);
@@ -731,9 +761,32 @@
   }
 
   .bov table {
-    @apply block w-full overflow-auto rounded-[6px] border text-[12px];
+    @apply w-full rounded-[6px] border text-[12px];
     border-color: var(--bov-line);
     background: var(--bov-surface);
+    border-collapse: separate;
+    border-spacing: 0;
+    table-layout: auto;
+  }
+
+  .bov td:last-child,
+  .bov th:last-child {
+    width: 100%;
+  }
+
+  .bov td:not(:last-child),
+  .bov th:not(:last-child) {
+    white-space: nowrap;
+    width: 1%;
+  }
+
+  .bov tbody th[scope='row'],
+  .bov tbody th[scope='row'] code {
+    white-space: nowrap;
+  }
+
+  .bov tbody th[scope='row'] {
+    min-width: 160px;
   }
 
   .bov thead {
@@ -1097,5 +1150,312 @@
 
   .bov-generated-snippet > label {
     @apply m-0;
+  }
+
+  /* === ACTIVE SERVER PANEL (sidebar) === */
+  .bov-active-server {
+    @apply grid gap-2;
+  }
+
+  .bov-select-wrap {
+    @apply relative w-full;
+    color: var(--bov-faint);
+  }
+
+  .bov-select-wrap::after {
+    content: '';
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    width: 7px;
+    height: 7px;
+    border-right: 1.5px solid currentColor;
+    border-bottom: 1.5px solid currentColor;
+    transform: translateY(-70%) rotate(45deg);
+    pointer-events: none;
+  }
+
+  .bov-active-server-select {
+    @apply w-full rounded-[6px] border bg-transparent py-1.5 text-[12px];
+    border-color: var(--bov-line-strong);
+    background: var(--bov-surface);
+    color: var(--bov-text);
+    font-family: inherit;
+    padding-left: 8px;
+    padding-right: 28px;
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+  }
+
+  .bov-active-server-url {
+    @apply m-0 truncate text-[11px];
+  }
+
+  .bov-active-server-url code {
+    @apply truncate;
+  }
+
+  /* === PILLS / LINK BUTTON === */
+  .bov-pill-active {
+    color: var(--bov-bg);
+    background: var(--bov-accent);
+    border-color: var(--bov-accent);
+  }
+
+  .bov-link-button {
+    @apply inline cursor-pointer border-0 bg-transparent p-0 underline underline-offset-2;
+    color: var(--bov-accent);
+    font: inherit;
+  }
+
+  .bov-link-button:hover {
+    filter: brightness(0.85);
+  }
+
+  /* === SETTINGS MODAL (sidebar layout) === */
+  .bov-modal-wide {
+    @apply w-full max-w-3xl;
+  }
+
+  .bov-settings-shell {
+    @apply grid;
+    grid-template-columns: 180px 1fr;
+    min-height: 480px;
+    max-height: min(80vh, 720px);
+  }
+
+  .bov-settings-sidebar {
+    @apply grid content-start gap-4 px-4 py-5;
+    background: var(--bov-sidebar-bg);
+    border-right: 1px solid var(--bov-line);
+  }
+
+  .bov-settings-sidebar-header h2 {
+    @apply m-0 mt-1 text-[16px] font-semibold leading-tight;
+    letter-spacing: -0.01em;
+  }
+
+  .bov-settings-sidebar nav {
+    @apply grid gap-1;
+  }
+
+  .bov-settings-tab {
+    @apply cursor-pointer rounded-[6px] border-0 px-2.5 py-1.5 text-left text-[12px] font-medium transition-colors;
+    background: transparent;
+    color: var(--bov-muted);
+    font-family: inherit;
+  }
+
+  .bov-settings-tab:hover {
+    background: var(--bov-active);
+    color: var(--bov-text);
+  }
+
+  .bov-settings-tab[data-active='true'] {
+    background: var(--bov-accent);
+    color: var(--bov-bg);
+  }
+
+  .bov-settings-main {
+    @apply grid;
+    grid-template-rows: auto 1fr;
+    min-height: 0;
+  }
+
+  .bov-settings-main-header {
+    @apply flex items-center justify-between gap-2 px-5 py-4;
+    border-bottom: 1px solid var(--bov-line);
+  }
+
+  .bov-settings-main-header h3 {
+    @apply m-0 text-[15px] font-semibold;
+    letter-spacing: -0.01em;
+  }
+
+  .bov-settings-main-body {
+    @apply overflow-y-auto px-5 py-5;
+    scrollbar-width: thin;
+    scrollbar-color: var(--bov-line-strong) transparent;
+  }
+
+  .bov-settings-section {
+    @apply grid gap-5;
+  }
+
+  /* === SERVERS TAB === */
+  .bov-servers-tab {
+    @apply grid gap-4;
+    grid-template-columns: minmax(0, 200px) minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .bov-servers-list {
+    @apply grid gap-2;
+  }
+
+  .bov-servers-list-header {
+    @apply flex items-center justify-between;
+  }
+
+  .bov-servers-list-header h4 {
+    @apply m-0 text-[10px] font-semibold uppercase;
+    letter-spacing: 0.14em;
+    color: var(--bov-faint);
+  }
+
+  .bov-servers-list ul {
+    @apply m-0 grid list-none gap-1 p-0;
+  }
+
+  .bov-servers-list-item {
+    @apply grid w-full cursor-pointer gap-1 rounded-[6px] border px-2.5 py-2 text-left transition-colors;
+    border-color: var(--bov-line);
+    background: var(--bov-surface);
+    font-family: inherit;
+  }
+
+  .bov-servers-list-item:hover {
+    background: var(--bov-surface-2);
+  }
+
+  .bov-servers-list-item[data-active='true'] {
+    border-color: var(--bov-accent);
+  }
+
+  .bov-servers-list-item-main {
+    @apply grid min-w-0 gap-0.5;
+  }
+
+  .bov-servers-list-item-main strong {
+    @apply truncate text-[12px] font-semibold;
+    color: var(--bov-text);
+  }
+
+  .bov-servers-list-item-main code {
+    @apply truncate text-[10px];
+    background: transparent;
+    padding: 0;
+  }
+
+  .bov-servers-list-item-meta {
+    @apply flex items-center gap-1.5 text-[10px];
+    color: var(--bov-faint);
+  }
+
+  .bov-servers-detail {
+    @apply min-w-0;
+  }
+
+  .bov-server-form {
+    @apply grid gap-4;
+  }
+
+  .bov-server-form-header {
+    @apply flex items-start justify-between gap-3;
+    border-bottom: 1px solid var(--bov-line);
+    padding-bottom: 12px;
+  }
+
+  .bov-server-form-label {
+    @apply w-full rounded-[4px] border-0 bg-transparent text-[15px] font-semibold;
+    color: var(--bov-text);
+    font-family: inherit;
+    padding: 2px 0;
+  }
+
+  .bov-server-form-label:focus {
+    outline: 1px solid var(--bov-line-strong);
+    outline-offset: 2px;
+  }
+
+  .bov-server-form-id {
+    @apply m-0 mt-0.5 font-mono text-[10px];
+  }
+
+  .bov-server-form-actions {
+    @apply flex items-center gap-2;
+  }
+
+  .bov-server-form-row {
+    @apply grid items-center gap-2 text-[12px];
+    grid-template-columns: 120px 1fr;
+  }
+
+  .bov-server-form-row > span {
+    @apply font-mono text-[11px];
+    color: var(--bov-muted);
+  }
+
+  .bov-server-form-credentials {
+    @apply grid gap-3;
+  }
+
+  /* === COOKIES TAB === */
+  .bov-cookies-tab {
+    @apply grid gap-4;
+  }
+
+  .bov-cookies-list-header {
+    @apply flex items-center justify-between;
+  }
+
+  .bov-cookies-list-header h4 {
+    @apply m-0 text-[12px] font-semibold;
+    color: var(--bov-text);
+  }
+
+  .bov-cookies-list {
+    @apply m-0 grid list-none gap-2 p-0;
+  }
+
+  .bov-cookie-editor {
+    @apply grid gap-2 rounded-[6px] border p-3;
+    border-color: var(--bov-line);
+    background: var(--bov-surface);
+  }
+
+  .bov-cookie-editor-row {
+    @apply grid gap-2;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .bov-cookie-editor-row label {
+    @apply m-0 grid gap-1 text-[11px];
+  }
+
+  .bov-cookie-editor-row label > span {
+    @apply text-[9px] font-semibold uppercase;
+    letter-spacing: 0.12em;
+    color: var(--bov-faint);
+  }
+
+  .bov-cookie-editor-actions {
+    @apply flex justify-end;
+  }
+
+  /* === ACTIVE COOKIES (Try-it-out) === */
+  .bov-active-cookies {
+    @apply rounded-[6px] border p-3;
+    border-color: var(--bov-line);
+    background: var(--bov-surface);
+  }
+
+  .bov-active-cookies > summary {
+    @apply cursor-pointer text-[12px] font-medium;
+    color: var(--bov-text);
+  }
+
+  .bov-active-cookies-list {
+    @apply m-0 mt-2 grid list-none gap-1.5 p-0;
+  }
+
+  .bov-active-cookies-list li {
+    @apply flex items-center gap-2 text-[12px];
+  }
+
+  .bov-active-cookies-value {
+    @apply min-w-0 flex-1 truncate font-mono text-[11px];
+    color: var(--bov-muted);
   }
 }
