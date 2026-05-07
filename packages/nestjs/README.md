@@ -1,4 +1,4 @@
-# @better-openapi-viewer/nestjs
+# @clementoh/better-openapi-viewer-nestjs
 
 NestJS adapter for Better OpenAPI Viewer.
 
@@ -6,7 +6,7 @@ NestJS adapter for Better OpenAPI Viewer.
 
 ```ts
 import { SwaggerModule } from '@nestjs/swagger';
-import { setupBetterOpenApiViewer } from '@better-openapi-viewer/nestjs';
+import { setupBetterOpenApiViewer } from '@clementoh/better-openapi-viewer-nestjs';
 
 const document = SwaggerModule.createDocument(app, swaggerConfig);
 
@@ -58,7 +58,7 @@ The fallback shell supports custom CSS and JavaScript URLs today. If you bundle 
 
 ```ts
 import { join } from 'node:path';
-import { serveBetterOpenApiViewerStaticAssets } from '@better-openapi-viewer/nestjs';
+import { serveBetterOpenApiViewerStaticAssets } from '@clementoh/better-openapi-viewer-nestjs';
 
 setupBetterOpenApiViewer(app, {
   document,

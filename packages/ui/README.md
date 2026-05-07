@@ -1,4 +1,4 @@
-# @better-openapi-viewer/ui
+# @clementoh/better-openapi-viewer-ui
 
 React UI for Better OpenAPI Viewer.
 

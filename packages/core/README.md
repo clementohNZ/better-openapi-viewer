@@ -1,4 +1,4 @@
-# @better-openapi-viewer/core
+# @clementoh/better-openapi-viewer-core
 
 Framework-agnostic OpenAPI normalization and viewer primitives.
 
@@ -22,7 +22,7 @@ Framework-agnostic OpenAPI normalization and viewer primitives.
 `ViewerConfig` captures the framework-agnostic knobs adapters and UIs can share without depending on a specific renderer. Use `mergeViewerConfig` to layer package defaults, adapter defaults, and user overrides.
 
 ```ts
-import { mergeViewerConfig } from '@better-openapi-viewer/core';
+import { mergeViewerConfig } from '@clementoh/better-openapi-viewer-core';
 
 const config = mergeViewerConfig({
   title: 'Example API',
@@ -45,7 +45,7 @@ const config = mergeViewerConfig({
 `buildTryItOutRequest` builds a framework-neutral request model. Consumers can provide request interceptors before execution and apply response interceptors after their own HTTP client returns.
 
 ```ts
-import { applyTryItOutResponseInterceptor, buildTryItOutRequest, generateRequestSnippet } from '@better-openapi-viewer/core';
+import { applyTryItOutResponseInterceptor, buildTryItOutRequest, generateRequestSnippet } from '@clementoh/better-openapi-viewer-core';
 
 const request = buildTryItOutRequest({
   operation,
@@ -74,7 +74,7 @@ import {
   mergePreauthorizedCredentials,
   validateParameterValues,
   validateRequestBody,
-} from '@better-openapi-viewer/core';
+} from '@clementoh/better-openapi-viewer-core';
 
 const parameterResult = validateParameterValues({
   parameters: operation.parameters,
@@ -104,7 +104,7 @@ const auth = mergePreauthorizedCredentials({
 Server variable helpers expose defaults and allowed options without binding consumers to a UI.
 
 ```ts
-import { getServerVariableDefaults, getServerVariableOptions, normalizeServerVariables, selectServerUrl } from '@better-openapi-viewer/core';
+import { getServerVariableDefaults, getServerVariableOptions, normalizeServerVariables, selectServerUrl } from '@clementoh/better-openapi-viewer-core';
 
 const variables = normalizeServerVariables(server, { environment: 'staging' });
 const url = selectServerUrl([server], { variables });
