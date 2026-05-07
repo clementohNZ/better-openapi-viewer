@@ -198,6 +198,9 @@ importers:
       tailwindcss:
         specifier: ^3.4.19
         version: 3.4.19
+      webpack:
+        specifier: ^5.106.2
+        version: 5.106.2
 
 packages:
 
