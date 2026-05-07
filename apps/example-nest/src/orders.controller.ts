@@ -44,6 +44,7 @@ export class OrdersController {
   }
 
   @Post()
+  @ApiOperation({ summary: 'Create a new order' })
   @ApiHeader({ name: 'x-idempotency-key', required: true })
   @ApiHeader({ name: 'x-store-id', required: true })
   @ApiBody({ schema: { $ref: getSchemaPath(CreateOrderBody) } })
@@ -53,6 +54,7 @@ export class OrdersController {
   }
 
   @Get('stats')
+  @ApiOperation({ summary: 'Get order statistics' })
   @ApiQuery({ name: 'period', required: false, enum: ['today', 'week', 'month', 'quarter', 'year'], schema: { default: 'month' } })
   @ApiHeader({ name: 'x-store-id', required: true })
   @ApiOkResponse({
@@ -82,6 +84,7 @@ export class OrdersController {
   }
 
   @Post('batch')
+  @ApiOperation({ summary: 'Perform a batch action on orders' })
   @ApiBody({
     schema: {
       type: 'object',
@@ -116,6 +119,7 @@ export class OrdersController {
   }
 
   @Patch(':id/status')
+  @ApiOperation({ summary: 'Update order status' })
   @ApiBody({
     schema: {
       type: 'object',
@@ -135,12 +139,14 @@ export class OrdersController {
   }
 
   @Delete(':id')
+  @ApiOperation({ summary: 'Cancel an order' })
   @ApiNoContentResponse({ description: 'Order cancelled.' })
   cancelOrder(@Param('id') id: string) {
     return;
   }
 
   @Post(':id/items')
+  @ApiOperation({ summary: 'Add an item to an order' })
   @ApiBody({ schema: { $ref: getSchemaPath(OrderLineItem) } })
   @ApiCreatedResponse({ description: 'Item added to order.' })
   addOrderItem(@Param('id') id: string, @Body() body: any) {
@@ -148,6 +154,7 @@ export class OrdersController {
   }
 
   @Delete(':id/items/:itemId')
+  @ApiOperation({ summary: 'Remove an item from an order' })
   @ApiNoContentResponse({ description: 'Item removed from order.' })
   removeOrderItem(@Param('id') id: string, @Param('itemId') itemId: string) {
     return;
@@ -172,6 +179,7 @@ export class OrdersController {
   }
 
   @Post(':id/refund')
+  @ApiOperation({ summary: 'Initiate a refund for an order' })
   @ApiBody({
     schema: {
       type: 'object',
@@ -197,6 +205,7 @@ export class OrdersController {
   }
 
   @Get(':id/invoice')
+  @ApiOperation({ summary: 'Get order invoice' })
   @ApiQuery({ name: 'format', required: false, enum: ['json', 'pdf'], schema: { default: 'json' } })
   @ApiOkResponse({ description: 'Order invoice.' })
   getInvoice(@Param('id') id: string) {
@@ -204,6 +213,7 @@ export class OrdersController {
   }
 
   @Post(':id/notes')
+  @ApiOperation({ summary: 'Add a note to an order' })
   @ApiBody({
     schema: {
       type: 'object',
@@ -220,6 +230,7 @@ export class OrdersController {
   }
 
   @Get(':id/timeline')
+  @ApiOperation({ summary: 'Get order event timeline' })
   @ApiOkResponse({
     description: 'Order event timeline.',
     schema: {

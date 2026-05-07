@@ -50,6 +50,7 @@ export class NotificationsController {
   }
 
   @Post()
+  @ApiOperation({ summary: 'Send a notification' })
   @ApiBody({
     schema: {
       type: 'object',
@@ -72,12 +73,14 @@ export class NotificationsController {
   }
 
   @Patch(':id/read')
+  @ApiOperation({ summary: 'Mark a notification as read' })
   @ApiOkResponse({ description: 'Notification marked as read.' })
   markAsRead(@Param('id') id: string) {
     return { id, read: true };
   }
 
   @Post('mark-all-read')
+  @ApiOperation({ summary: 'Mark all notifications as read' })
   @ApiBody({
     schema: {
       type: 'object',
@@ -92,6 +95,7 @@ export class NotificationsController {
   }
 
   @Delete(':id')
+  @ApiOperation({ summary: 'Delete a notification' })
   @ApiNoContentResponse({ description: 'Notification deleted.' })
   deleteNotification(@Param('id') id: string) {
     return;
@@ -140,6 +144,7 @@ export class NotificationsController {
   }
 
   @Patch('preferences')
+  @ApiOperation({ summary: 'Update notification preferences' })
   @ApiBody({
     schema: {
       type: 'object',
@@ -181,6 +186,7 @@ export class NotificationsController {
   }
 
   @Post('test')
+  @ApiOperation({ summary: 'Send a test notification' })
   @ApiBody({
     schema: {
       type: 'object',

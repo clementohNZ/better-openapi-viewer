@@ -54,6 +54,7 @@ export class AuthController {
   }
 
   @Post('register')
+  @ApiOperation({ summary: 'Register a new account' })
   @ApiHeader({ name: 'x-invite-token', required: false, description: 'Invitation token for restricted registration.' })
   @ApiBody({
     schema: {
@@ -73,6 +74,7 @@ export class AuthController {
   }
 
   @Post('refresh')
+  @ApiOperation({ summary: 'Refresh access token' })
   @ApiBody({
     schema: {
       type: 'object',
@@ -97,6 +99,7 @@ export class AuthController {
   }
 
   @Post('logout')
+  @ApiOperation({ summary: 'Log out and revoke tokens' })
   @ApiBearerAuth()
   @ApiBody({
     schema: {
@@ -113,6 +116,7 @@ export class AuthController {
   }
 
   @Post('forgot-password')
+  @ApiOperation({ summary: 'Request a password reset email' })
   @ApiBody({
     schema: {
       type: 'object',
@@ -128,6 +132,7 @@ export class AuthController {
   }
 
   @Post('reset-password')
+  @ApiOperation({ summary: 'Reset password with token' })
   @ApiBody({
     schema: {
       type: 'object',
@@ -145,6 +150,7 @@ export class AuthController {
   }
 
   @Post('verify-email')
+  @ApiOperation({ summary: 'Verify email address' })
   @ApiBody({
     schema: {
       type: 'object',
@@ -184,6 +190,7 @@ export class AuthController {
   }
 
   @Patch('me')
+  @ApiOperation({ summary: 'Update current user profile' })
   @ApiBearerAuth()
   @ApiBody({
     schema: {
@@ -220,6 +227,7 @@ export class AuthController {
   }
 
   @Post('mfa/verify')
+  @ApiOperation({ summary: 'Verify and enable MFA' })
   @ApiBearerAuth()
   @ApiBody({
     schema: {
@@ -236,6 +244,7 @@ export class AuthController {
   }
 
   @Post('mfa/disable')
+  @ApiOperation({ summary: 'Disable multi-factor authentication' })
   @ApiBearerAuth()
   @ApiBody({
     schema: {

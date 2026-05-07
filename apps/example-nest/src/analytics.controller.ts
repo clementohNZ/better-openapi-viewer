@@ -79,6 +79,7 @@ export class AnalyticsController {
   }
 
   @Get('users')
+  @ApiOperation({ summary: 'Get user growth analytics' })
   @ApiQuery({ name: 'period', required: false, enum: ['today', 'week', 'month', 'year'], schema: { default: 'month' } })
   @ApiOkResponse({
     description: 'User growth analytics.',
@@ -99,6 +100,7 @@ export class AnalyticsController {
   }
 
   @Get('events')
+  @ApiOperation({ summary: 'List tracked events' })
   @ApiQuery({ name: 'event', required: false, description: 'Filter by event name.' })
   @ApiQuery({ name: 'from', required: false, schema: { type: 'string', format: 'date-time' } })
   @ApiQuery({ name: 'to', required: false, schema: { type: 'string', format: 'date-time' } })
@@ -109,6 +111,7 @@ export class AnalyticsController {
   }
 
   @Post('events/track')
+  @ApiOperation({ summary: 'Track an analytics event' })
   @ApiBody({
     schema: {
       type: 'object',
@@ -137,6 +140,7 @@ export class AnalyticsController {
   }
 
   @Get('funnels')
+  @ApiOperation({ summary: 'Get funnel analysis' })
   @ApiQuery({ name: 'funnelId', required: true, description: 'Pre-defined funnel configuration ID.' })
   @ApiQuery({ name: 'period', required: false, enum: ['week', 'month', 'quarter'], schema: { default: 'month' } })
   @ApiOkResponse({
@@ -168,6 +172,7 @@ export class AnalyticsController {
   }
 
   @Get('retention')
+  @ApiOperation({ summary: 'Get retention cohort data' })
   @ApiQuery({ name: 'from', required: true, schema: { type: 'string', format: 'date' } })
   @ApiQuery({ name: 'granularity', required: false, enum: ['day', 'week', 'month'], schema: { default: 'week' } })
   @ApiOkResponse({
@@ -194,6 +199,7 @@ export class AnalyticsController {
   }
 
   @Get('cohorts')
+  @ApiOperation({ summary: 'Get cohort analysis' })
   @ApiQuery({ name: 'cohortType', required: false, enum: ['acquisition', 'activation', 'revenue'], schema: { default: 'acquisition' } })
   @ApiQuery({ name: 'period', required: false, enum: ['month', 'quarter'], schema: { default: 'month' } })
   @ApiOkResponse({ description: 'Cohort analysis.' })
@@ -202,6 +208,7 @@ export class AnalyticsController {
   }
 
   @Get('custom-reports')
+  @ApiOperation({ summary: 'List saved custom reports' })
   @ApiOkResponse({
     description: 'Saved custom reports.',
     schema: {
@@ -223,6 +230,7 @@ export class AnalyticsController {
   }
 
   @Post('custom-reports')
+  @ApiOperation({ summary: 'Create a custom report' })
   @ApiBody({
     schema: {
       type: 'object',
@@ -255,6 +263,7 @@ export class AnalyticsController {
   }
 
   @Get('export')
+  @ApiOperation({ summary: 'Export analytics data' })
   @ApiQuery({ name: 'report', required: true, description: 'Report type to export.' })
   @ApiQuery({ name: 'format', required: false, enum: ['csv', 'json', 'xlsx'], schema: { default: 'csv' } })
   @ApiQuery({ name: 'from', required: true, schema: { type: 'string', format: 'date' } })

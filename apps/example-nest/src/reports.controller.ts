@@ -94,6 +94,7 @@ export class ReportsController {
   }
 
   @Get('templates')
+  @ApiOperation({ summary: 'List available report templates' })
   @ApiOkResponse({
     description: 'Available report templates.',
     schema: {
@@ -117,12 +118,14 @@ export class ReportsController {
   }
 
   @Get(':id')
+  @ApiOperation({ summary: 'Get report status and detail' })
   @ApiOkResponse({ description: 'Report detail and status.' })
   getReport(@Param('id') id: string) {
     return { id, status: 'pending' };
   }
 
   @Get(':id/download')
+  @ApiOperation({ summary: 'Get a download URL for a completed report' })
   @ApiOkResponse({
     description: 'Presigned download URL for the completed report.',
     schema: {
@@ -140,6 +143,7 @@ export class ReportsController {
   }
 
   @Delete(':id')
+  @ApiOperation({ summary: 'Delete a report' })
   @ApiNoContentResponse({ description: 'Report deleted.' })
   deleteReport(@Param('id') id: string) {
     return;

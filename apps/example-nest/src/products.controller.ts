@@ -52,6 +52,7 @@ export class ProductsController {
   }
 
   @Post()
+  @ApiOperation({ summary: 'Create a new product' })
   @ApiBearerAuth()
   @ApiHeader({ name: 'x-idempotency-key', required: true, description: 'Unique key to prevent duplicate submissions.' })
   @ApiBody({ schema: { $ref: getSchemaPath(CreateProductBody) } })
@@ -70,6 +71,7 @@ export class ProductsController {
   }
 
   @Get('categories')
+  @ApiOperation({ summary: 'Get product categories' })
   @ApiHeader({ name: 'x-store-id', required: true })
   @ApiOkResponse({
     description: 'Product categories tree.',
@@ -93,6 +95,7 @@ export class ProductsController {
   }
 
   @Post('bulk-import')
+  @ApiOperation({ summary: 'Bulk import products' })
   @ApiBearerAuth()
   @ApiHeader({ name: 'x-store-id', required: true })
   @ApiBody({
@@ -134,12 +137,14 @@ export class ProductsController {
   }
 
   @Get(':id')
+  @ApiOperation({ summary: 'Get a product by ID' })
   @ApiOkResponse({ description: 'Product detail.', schema: { $ref: getSchemaPath(Product) } })
   getProduct(@Param('id') id: string) {
     return { id, name: 'Ergonomic Keyboard', price: 129.99, currency: 'USD' };
   }
 
   @Patch(':id')
+  @ApiOperation({ summary: 'Update a product' })
   @ApiBearerAuth()
   @ApiBody({ schema: { $ref: getSchemaPath(UpdateProductBody) } })
   @ApiOkResponse({ description: 'Updated product.', schema: { $ref: getSchemaPath(Product) } })
@@ -148,6 +153,7 @@ export class ProductsController {
   }
 
   @Delete(':id')
+  @ApiOperation({ summary: 'Delete a product' })
   @ApiBearerAuth()
   @ApiNoContentResponse({ description: 'Product deleted.' })
   deleteProduct(@Param('id') id: string) {
@@ -168,6 +174,7 @@ export class ProductsController {
   }
 
   @Post(':id/variants')
+  @ApiOperation({ summary: 'Create a product variant' })
   @ApiBearerAuth()
   @ApiBody({
     schema: {
@@ -187,6 +194,7 @@ export class ProductsController {
   }
 
   @Delete(':id/variants/:variantId')
+  @ApiOperation({ summary: 'Delete a product variant' })
   @ApiBearerAuth()
   @ApiNoContentResponse({ description: 'Variant deleted.' })
   deleteVariant(@Param('id') id: string, @Param('variantId') variantId: string) {
@@ -194,6 +202,7 @@ export class ProductsController {
   }
 
   @Get(':id/reviews')
+  @ApiOperation({ summary: 'List product reviews' })
   @ApiQuery({ name: 'rating', required: false, schema: { type: 'integer', minimum: 1, maximum: 5 } })
   @ApiQuery({ name: 'page', required: false, schema: { type: 'integer', default: 1 } })
   @ApiOkResponse({ description: 'Product reviews.' })
@@ -202,6 +211,7 @@ export class ProductsController {
   }
 
   @Post(':id/reviews')
+  @ApiOperation({ summary: 'Submit a product review' })
   @ApiBearerAuth()
   @ApiBody({
     schema: {
@@ -245,6 +255,7 @@ export class ProductsController {
   }
 
   @Get(':id/related')
+  @ApiOperation({ summary: 'Get related products' })
   @ApiQuery({ name: 'limit', required: false, schema: { type: 'integer', default: 6 } })
   @ApiOkResponse({ description: 'Related products.' })
   getRelatedProducts(@Param('id') id: string) {

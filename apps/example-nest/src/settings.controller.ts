@@ -39,6 +39,7 @@ export class SettingsController {
   }
 
   @Patch()
+  @ApiOperation({ summary: 'Update general settings' })
   @ApiBody({
     schema: {
       type: 'object',
@@ -93,6 +94,7 @@ export class SettingsController {
   }
 
   @Patch('security')
+  @ApiOperation({ summary: 'Update security settings' })
   @ApiBody({
     schema: {
       type: 'object',
@@ -126,6 +128,7 @@ export class SettingsController {
   }
 
   @Get('billing')
+  @ApiOperation({ summary: 'Get billing information' })
   @ApiOkResponse({
     description: 'Billing information.',
     schema: {
@@ -167,6 +170,7 @@ export class SettingsController {
   }
 
   @Post('billing/payment-method')
+  @ApiOperation({ summary: 'Add a payment method' })
   @ApiBody({
     schema: {
       type: 'object',
@@ -183,12 +187,14 @@ export class SettingsController {
   }
 
   @Delete('billing/payment-method/:id')
+  @ApiOperation({ summary: 'Remove a payment method' })
   @ApiNoContentResponse({ description: 'Payment method removed.' })
   deletePaymentMethod(@Param('id') id: string) {
     return;
   }
 
   @Get('audit-log')
+  @ApiOperation({ summary: 'Get audit log' })
   @ApiQuery({ name: 'userId', required: false })
   @ApiQuery({ name: 'action', required: false, description: 'Filter by action type.' })
   @ApiQuery({ name: 'from', required: false, schema: { type: 'string', format: 'date-time' } })

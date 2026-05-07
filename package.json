@@ -1,19 +1,15 @@
 {
   "name": "better-openapi-viewer",
   "private": true,
-  "packageManager": "npm@10.9.0",
+  "packageManager": "pnpm@10.10.0",
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev --parallel --filter=!example-core",
     "lint": "turbo run lint",
-    "pack:check": "npm run build && npm pack --workspace @clementoh/better-openapi-viewer-core --workspace @clementoh/better-openapi-viewer-ui --workspace @clementoh/better-openapi-viewer-nestjs --dry-run",
+    "pack:check": "pnpm run build && pnpm --filter @clementoh/better-openapi-viewer-core --filter @clementoh/better-openapi-viewer-ui --filter @clementoh/better-openapi-viewer-nestjs pack --dry-run",
     "typecheck": "turbo run typecheck",
     "format": "prettier --write \"**/*.{ts,tsx,js,json,md,css}\""
   },
-  "workspaces": [
-    "apps/*",
-    "packages/*"
-  ],
   "devDependencies": {
     "@types/node": "^22.15.3",
     "prettier": "^3.5.3",

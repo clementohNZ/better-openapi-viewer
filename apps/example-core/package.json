@@ -11,6 +11,6 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@clementoh/better-openapi-viewer-core": "*"
+    "@clementoh/better-openapi-viewer-core": "workspace:*"
   }
 }

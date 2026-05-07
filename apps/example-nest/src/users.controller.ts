@@ -55,6 +55,7 @@ export class UsersController {
   }
 
   @Get('search')
+  @ApiOperation({ summary: 'Search users' })
   @ApiQuery({ name: 'q', required: true, description: 'Full-text search query.' })
   @ApiQuery({ name: 'role', enum: ['admin', 'member'], required: false })
   @ApiQuery({ name: 'limit', required: false, schema: { type: 'integer', minimum: 1, maximum: 100, default: 25 } })
@@ -85,6 +86,7 @@ export class UsersController {
   }
 
   @Patch(':id')
+  @ApiOperation({ summary: 'Update a user' })
   @ApiBearerAuth()
   @ApiBody({ schema: { $ref: getSchemaPath(UpdateUserBody) } })
   @ApiOkResponse({ description: 'Updated user.', schema: { $ref: getSchemaPath(User) } })
@@ -93,6 +95,7 @@ export class UsersController {
   }
 
   @Delete(':id')
+  @ApiOperation({ summary: 'Delete a user' })
   @ApiBearerAuth()
   @ApiNoContentResponse({ description: 'User deleted.' })
   deleteUser(@Param('id') id: string) {

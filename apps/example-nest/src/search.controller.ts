@@ -46,6 +46,7 @@ export class SearchController {
   }
 
   @Post('advanced')
+  @ApiOperation({ summary: 'Advanced search with query DSL' })
   @ApiBearerAuth()
   @ApiBody({
     schema: {
@@ -88,6 +89,7 @@ export class SearchController {
   }
 
   @Get('suggestions')
+  @ApiOperation({ summary: 'Get autocomplete suggestions' })
   @ApiQuery({ name: 'q', required: true })
   @ApiQuery({ name: 'type', required: false, enum: ['products', 'categories', 'brands', 'users'] })
   @ApiQuery({ name: 'limit', required: false, schema: { type: 'integer', default: 8, maximum: 20 } })
@@ -111,6 +113,7 @@ export class SearchController {
   }
 
   @Get('recent')
+  @ApiOperation({ summary: 'Get recent searches' })
   @ApiBearerAuth()
   @ApiQuery({ name: 'limit', required: false, schema: { type: 'integer', default: 10 } })
   @ApiOkResponse({
@@ -132,6 +135,7 @@ export class SearchController {
   }
 
   @Delete('recent')
+  @ApiOperation({ summary: 'Clear recent search history' })
   @ApiBearerAuth()
   @ApiNoContentResponse({ description: 'Recent search history cleared.' })
   clearRecentSearches() {
@@ -139,6 +143,7 @@ export class SearchController {
   }
 
   @Get('filters')
+  @ApiOperation({ summary: 'Get available search filters' })
   @ApiQuery({ name: 'index', required: false, enum: ['products', 'orders', 'users'], schema: { default: 'products' } })
   @ApiOkResponse({
     description: 'Available search filters for a given index.',

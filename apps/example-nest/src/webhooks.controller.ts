@@ -88,12 +88,14 @@ export class WebhooksController {
   }
 
   @Get(':id')
+  @ApiOperation({ summary: 'Get a webhook' })
   @ApiOkResponse({ description: 'Webhook detail.' })
   getWebhook(@Param('id') id: string) {
     return { id, url: 'https://example.com/wh', events: [], isActive: true };
   }
 
   @Patch(':id')
+  @ApiOperation({ summary: 'Update a webhook' })
   @ApiBody({
     schema: {
       type: 'object',
@@ -112,12 +114,14 @@ export class WebhooksController {
   }
 
   @Delete(':id')
+  @ApiOperation({ summary: 'Delete a webhook' })
   @ApiNoContentResponse({ description: 'Webhook deleted.' })
   deleteWebhook(@Param('id') id: string) {
     return;
   }
 
   @Post(':id/test')
+  @ApiOperation({ summary: 'Send a test webhook delivery' })
   @ApiBody({
     schema: {
       type: 'object',
@@ -145,6 +149,7 @@ export class WebhooksController {
   }
 
   @Get(':id/deliveries')
+  @ApiOperation({ summary: 'Get webhook delivery history' })
   @ApiQuery({ name: 'status', required: false, enum: ['success', 'failed', 'pending'] })
   @ApiQuery({ name: 'event', required: false })
   @ApiQuery({ name: 'page', required: false, schema: { type: 'integer', default: 1 } })
@@ -177,6 +182,7 @@ export class WebhooksController {
   }
 
   @Post(':id/rotate-secret')
+  @ApiOperation({ summary: 'Rotate webhook signing secret' })
   @ApiOkResponse({
     description: 'New signing secret.',
     schema: {

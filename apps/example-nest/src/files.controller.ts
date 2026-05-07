@@ -93,12 +93,14 @@ export class FilesController {
   }
 
   @Get(':id')
+  @ApiOperation({ summary: 'Get file metadata' })
   @ApiOkResponse({ description: 'File metadata.' })
   getFile(@Param('id') id: string) {
     return { id, filename: 'example.png', contentType: 'image/png', size: 102400 };
   }
 
   @Patch(':id/metadata')
+  @ApiOperation({ summary: 'Update file metadata' })
   @ApiBody({
     schema: {
       type: 'object',
@@ -116,12 +118,14 @@ export class FilesController {
   }
 
   @Delete(':id')
+  @ApiOperation({ summary: 'Delete a file' })
   @ApiNoContentResponse({ description: 'File deleted.' })
   deleteFile(@Param('id') id: string) {
     return;
   }
 
   @Post(':id/presigned-url')
+  @ApiOperation({ summary: 'Generate a presigned URL' })
   @ApiBody({
     schema: {
       type: 'object',
@@ -149,6 +153,7 @@ export class FilesController {
   }
 
   @Get(':id/versions')
+  @ApiOperation({ summary: 'Get file version history' })
   @ApiOkResponse({
     description: 'File version history.',
     schema: {
@@ -171,6 +176,7 @@ export class FilesController {
   }
 
   @Post('batch-delete')
+  @ApiOperation({ summary: 'Delete multiple files' })
   @ApiBody({
     schema: {
       type: 'object',
