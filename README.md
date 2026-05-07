@@ -14,6 +14,7 @@ A richer, more usable OpenAPI reference and try-it-out client — built as a dro
   - [Minimal setup](#minimal-setup)
   - [Options reference](#options-reference)
   - [Multiple specs](#multiple-specs)
+  - [Making models appear in the Models browser](#making-models-appear-in-the-models-browser)
 - [Use without NestJS](#use-without-nestjs)
   - [Standalone static page](#standalone-static-page)
   - [Drop-in browser bundle](#drop-in-browser-bundle)
@@ -226,6 +227,98 @@ setupBetterOpenApiViewer(app, {
 | `document` | `OpenAPIObject` | Pre-built document |
 | `documentFactory` | `() => OpenAPIObject \| Promise<OpenAPIObject>` | Lazily-built document |
 | `title` | `string` | Override the page title for this spec |
+
+---
+
+### Making models appear in the Models browser
+
+The viewer's **Models** browser (opened by clicking the **Models** count in the header) lists every schema registered in the `components/schemas` section of your OpenAPI document. It also powers the sidebar model filter checkboxes that narrow the operations list to endpoints referencing a given model.
+
+`@nestjs/swagger` only registers a class as a named schema when it has both `@ApiProperty()` decorators on its fields **and** at least one reference to it in the document. If a class is only used through manual `schema: { ... }` objects (no `$ref`) or is never referenced at all, it won't appear in the models list.
+
+**Step 1 — decorate every DTO property with `@ApiProperty()`**
+
+```ts
+// user.dto.ts
+import { ApiProperty } from '@nestjs/swagger';
+
+export class User {
+  @ApiProperty({ example: 'usr_1' })
+  id!: string;
+
+  @ApiProperty({ example: 'Ada Lovelace' })
+  name!: string;
+
+  @ApiProperty({ example: 'ada@example.com', format: 'email' })
+  email!: string;
+
+  @ApiProperty({ enum: ['admin', 'member'], default: 'member' })
+  role!: 'admin' | 'member';
+}
+
+export class CreateUserBody {
+  @ApiProperty({ example: 'Katherine Johnson' })
+  name!: string;
+
+  @ApiProperty({ example: 'katherine@example.com', format: 'email' })
+  email!: string;
+
+  @ApiProperty({ enum: ['admin', 'member'], default: 'member', required: false })
+  role?: 'admin' | 'member';
+}
+```
+
+**Step 2 — register models with `@ApiExtraModels()` on the controller**
+
+`@nestjs/swagger` can discover a model automatically when it is used as a typed parameter or return type, but it often misses models used only inside `schema: { $ref: ... }` objects. Register every DTO you plan to reference on the controller class (or on individual route handlers):
+
+```ts
+import { ApiExtraModels, getSchemaPath } from '@nestjs/swagger';
+import { User, CreateUserBody } from './user.dto.js';
+
+@ApiTags('users')
+@Controller('users')
+@ApiExtraModels(User, CreateUserBody)   // ← registers both schemas
+export class UsersController { ... }
+```
+
+You can also call `@ApiExtraModels()` once at the module level on your `AppModule` to register shared models globally.
+
+**Step 3 — reference models with `getSchemaPath()` in response and body decorators**
+
+Use `$ref: getSchemaPath(ModelClass)` instead of duplicating the schema inline. This creates the link between the operation and the model that the viewer uses for the sidebar filter:
+
+```ts
+import { ApiBody, ApiCreatedResponse, ApiOkResponse, getSchemaPath } from '@nestjs/swagger';
+
+@Get()
+@ApiOkResponse({
+  schema: {
+    type: 'object',
+    properties: {
+      data: { type: 'array', items: { $ref: getSchemaPath(User) } },
+    },
+  },
+})
+listUsers() { ... }
+
+@Post()
+@ApiBody({ schema: { $ref: getSchemaPath(CreateUserBody) } })
+@ApiCreatedResponse({ schema: { $ref: getSchemaPath(User) } })
+createUser(@Body() body: CreateUserBody) { ... }
+```
+
+If your endpoint returns a DTO directly as a typed parameter (e.g. `@ApiOkResponse({ type: User })`), `@nestjs/swagger` registers and references the model automatically — you only need `@ApiExtraModels` + `getSchemaPath` when using manual `schema: { ... }` objects.
+
+**Quick checklist**
+
+| | What to do |
+|---|---|
+| DTO fields | Add `@ApiProperty()` to every property you want in the schema |
+| Controller | Add `@ApiExtraModels(Dto1, Dto2, ...)` to register schemas |
+| Responses | Use `schema: { $ref: getSchemaPath(MyDto) }` instead of inline shapes |
+| Request bodies | Use `@ApiBody({ schema: { $ref: getSchemaPath(MyDto) } })` |
+| Simple case | `@ApiOkResponse({ type: User })` — Nest registers the model automatically |
 
 ---
 
