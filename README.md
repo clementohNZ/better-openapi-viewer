@@ -9,7 +9,7 @@ A richer, more usable OpenAPI reference and try-it-out client — built as a dro
 - [Screenshots](#screenshots)
 - [Features](#features)
 - [Packages](#packages)
-- [Installation](#installation)
+- [Quick start](#quick-start)
 - [NestJS integration](#nestjs-integration)
   - [Minimal setup](#minimal-setup)
   - [Options reference](#options-reference)
@@ -44,12 +44,14 @@ A richer, more usable OpenAPI reference and try-it-out client — built as a dro
 
 ## Features
 
-- **Operations sidebar** — all endpoints grouped by tag, searchable and filterable by HTTP method, tag, and auth state
+- **Operations sidebar** — all endpoints grouped by tag, searchable and filterable by HTTP method, tag, auth state, deprecation status, content type, and referenced model
+- **Persistent filters** — active filters are written to the URL as query params (`?method=get,post&tag=users&model=User`) so any filtered view can be bookmarked, copy-pasted, or shared and will restore exactly on reload; a **Reset** link clears everything in one click
 - **Reference panel** — path, method, operation ID, parameters table (query / header / path), request body schema, response schemas, security requirements, and server list — all at a glance
 - **Try it out** — fill parameters and a JSON body editor inline; sends the request from your browser with full header and cookie support
 - **Per-server credentials** — bearer JWT and API key fields stored per server, applied automatically to every try-it-out request
 - **Cookie jar** — add, edit, and delete cookies per server; the viewer attaches them as a `Cookie` header and merges incoming `Set-Cookie` response headers back (when CORS allows)
 - **Generated snippets** — curl and other language snippets generated from the current inputs
+- **Models browser** — click the **Models** count in the header to open a searchable two-column browser: model names on the left, full schema tree on the right using the same structured display as the reference panel; model names also appear as sidebar filter checkboxes to narrow the operations list to endpoints that reference a given model
 - **Multiple specs** — mount several OpenAPI documents under one viewer with tab navigation
 - **Add specs at runtime** — point the viewer at any reachable OpenAPI URL (JSON or YAML) from the in-app **Settings → Specs** tab; user-added specs are saved to `localStorage` and shared across viewer instances on the same origin
 - **Export / import settings** — back up your preferences, user-added specs, saved servers, and (opt-in) credentials as a portable JSON file
@@ -69,7 +71,7 @@ A richer, more usable OpenAPI reference and try-it-out client — built as a dro
 
 ---
 
-## Installation
+## Quick start
 
 ### NestJS
 
@@ -78,6 +80,49 @@ npm install @clementoh/better-openapi-viewer-nestjs
 ```
 
 `@clementoh/better-openapi-viewer-core` and `@clementoh/better-openapi-viewer-ui` are bundled inside `@clementoh/better-openapi-viewer-nestjs` — you do not need to install them separately.
+
+```ts
+// main.ts
+import { NestFactory } from '@nestjs/core';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { setupBetterOpenApiViewer } from '@clementoh/better-openapi-viewer-nestjs';
+import { AppModule } from './app.module.js';
+
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule);
+
+  const config = new DocumentBuilder().setTitle('My API').setVersion('1.0.0').build();
+  const document = SwaggerModule.createDocument(app, config);
+
+  setupBetterOpenApiViewer(app, {
+    path: 'docs',
+    jsonPath: 'docs/openapi.json',
+    document,
+  });
+
+  await app.listen(3000);
+}
+
+void bootstrap();
+```
+
+The viewer is then available at `http://localhost:3000/docs`.
+
+### React component
+
+```bash
+npm install @clementoh/better-openapi-viewer-ui react react-dom
+```
+
+See the [React component](#react-component) section for usage.
+
+### Browser bundle (no build step)
+
+```bash
+npm install @clementoh/better-openapi-viewer-ui
+```
+
+Copy `dist/browser/viewer.js` and `dist/browser/viewer.css` from the package and serve them alongside a plain HTML page. See the [Drop-in browser bundle](#drop-in-browser-bundle) section for the full setup.
 
 ---
 
@@ -335,19 +380,35 @@ All UI state lives in `localStorage` under the `better-openapi-viewer:*` namespa
 
 ## Development
 
+To contribute or build the packages locally:
+
 ```bash
 npm install        # install all workspace dependencies
 npm run build      # build all packages
-npm run dev        # build in watch mode (all packages in parallel)
+npm run dev        # build packages in watch mode AND start every example server
 npm run pack:check # dry-run npm pack for all publishable packages
 ```
 
-The example app (`apps/example-nest`) starts the viewer at `http://localhost:3000/docs` with 100+ demo endpoints covering varied schemas, auth schemes, and header requirements.
+`npm run dev` runs in parallel and brings up every server-style example alongside the watch-mode builds:
 
-```bash
-cd apps/example-nest
-npm run start:dev
-```
+| Server | URL | Notes |
+|---|---|---|
+| `example-nest` — Better OpenAPI Viewer | http://localhost:3000/docs | The viewer being developed |
+| `example-nest` — Swagger UI | http://localhost:3000/swagger | Stock Swagger UI for comparison |
+| `example-nest` — OpenAPI JSON | http://localhost:3000/docs/openapi.json | Raw spec |
+| `standalone` | http://localhost:4173/ | Prebuilt browser bundle, no framework |
+| `example-ui` | http://localhost:4174/ | React component, bundled spec |
+
+The `example-core` script is a one-shot CLI rather than a server, so it's excluded from the root `dev` task — run it on demand with `npm run dev --workspace example-core`.
+
+The repo ships several example apps that each exercise a different layer of the stack:
+
+| App | What it shows | Run it |
+|---|---|---|
+| `apps/example-nest` | NestJS adapter mounted with 100+ demo endpoints, varied schemas, auth schemes, and header requirements. Viewer at `http://localhost:3000/docs`. | `npm run dev --workspace example-nest` |
+| `apps/example-core` | Headless Node script — normalises a small inline spec, groups operations by tag, validates parameters, and prints curl/fetch snippets via the framework-agnostic core. | `npm run dev --workspace example-core` |
+| `apps/example-ui` | Minimal React app that imports `<BetterOpenApiViewer />` and renders a bundled `document` directly. Viewer at `http://localhost:4174`. | `npm run dev --workspace example-ui` |
+| `apps/standalone` | Static-site build of the prebuilt browser bundle (`viewer.js` + `viewer.css`), driven by `window.__BETTER_OPENAPI_VIEWER_CONFIG__`. Viewer at `http://localhost:4173`. | `npm run dev --workspace standalone` |
 
 ---
 
@@ -359,7 +420,10 @@ packages/
   ui/      – React viewer (also builds a self-contained browser bundle)
   nestjs/  – NestJS adapter
 apps/
-  example-nest/  – development sandbox with 100+ demo endpoints
+  example-nest/  – NestJS adapter sandbox with 100+ demo endpoints
+  example-core/  – headless Node CLI demoing core primitives (no UI)
+  example-ui/    – minimal React app rendering <BetterOpenApiViewer /> with a bundled spec
+  standalone/    – static-site build of the prebuilt browser bundle
 ```
 
 ---

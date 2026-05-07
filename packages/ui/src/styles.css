@@ -188,6 +188,115 @@
     color: var(--bov-faint);
   }
 
+  .bov-section-heading-actions {
+    @apply flex items-baseline gap-2;
+  }
+
+  .bov-metric-button {
+    @apply block w-full cursor-pointer bg-transparent border-0 p-0 text-left;
+  }
+
+  .bov-metric-button:hover dd {
+    text-decoration: underline;
+  }
+
+  .bov-models-modal {
+    max-height: min(80vh, 720px);
+    display: grid;
+    grid-template-rows: auto 1fr;
+  }
+
+  .bov-modal.bov-models-modal {
+    width: calc(100vw - 2rem);
+    max-width: 1200px;
+  }
+
+  .bov-models-shell {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    min-height: 560px;
+    max-height: min(82vh, 780px);
+    overflow: hidden;
+  }
+
+  .bov-models-sidebar {
+    @apply grid content-start overflow-hidden;
+    grid-template-rows: auto auto 1fr;
+    border-right: 1px solid var(--bov-line);
+    background: var(--bov-sidebar-bg);
+  }
+
+  .bov-models-sidebar-header {
+    @apply flex items-baseline justify-between gap-2 px-4 pt-4 pb-2;
+  }
+
+  .bov-models-sidebar-header h2 {
+    @apply m-0 text-[13px] font-semibold;
+    color: var(--bov-text);
+  }
+
+  .bov-models-count {
+    @apply font-mono text-[11px];
+    color: var(--bov-faint);
+  }
+
+  .bov-models-search {
+    @apply mx-3 mb-2;
+  }
+
+  .bov-models-list {
+    @apply m-0 list-none overflow-y-auto p-0 pb-3;
+    padding-inline: 0;
+  }
+
+  .bov-models-list-item {
+    @apply block w-full cursor-pointer border-0 bg-transparent px-4 py-1.5 text-left font-mono text-[12px];
+    color: var(--bov-muted);
+  }
+
+  .bov-models-list-item:hover {
+    color: var(--bov-text);
+    background: color-mix(in srgb, var(--bov-accent) 8%, transparent);
+  }
+
+  .bov-models-list-item--active {
+    color: var(--bov-accent) !important;
+    font-weight: 500;
+  }
+
+  .bov-models-list-empty {
+    @apply px-4 py-2 text-[12px];
+    color: var(--bov-faint);
+  }
+
+  .bov-models-detail {
+    @apply grid overflow-hidden;
+    grid-template-rows: auto 1fr;
+  }
+
+  .bov-models-detail-header {
+    @apply flex items-center justify-between gap-3 px-5 py-3;
+    border-bottom: 1px solid var(--bov-line);
+  }
+
+  .bov-models-detail-name {
+    @apply font-mono text-[14px] font-semibold;
+    color: var(--bov-text);
+  }
+
+  .bov-models-detail-body {
+    @apply overflow-y-auto px-5 py-4;
+  }
+
+  .bov-reset-filters {
+    @apply font-mono text-[10px] cursor-pointer bg-transparent border-0 p-0 underline;
+    color: var(--bov-faint);
+  }
+
+  .bov-reset-filters:hover {
+    color: var(--bov-text);
+  }
+
   .bov-field {
     @apply grid gap-1.5 text-[12px];
   }

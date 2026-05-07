@@ -3,17 +3,21 @@ import {
   ApiBearerAuth,
   ApiBody,
   ApiCreatedResponse,
+  ApiExtraModels,
   ApiHeader,
   ApiNoContentResponse,
   ApiOkResponse,
   ApiOperation,
   ApiQuery,
   ApiTags,
+  getSchemaPath,
 } from '@nestjs/swagger';
+import { Address, CreateOrderBody, Order, OrderLineItem, TrackingEvent } from './orders.dto.js';
 
 @ApiTags('orders')
 @ApiBearerAuth()
 @Controller('orders')
+@ApiExtraModels(Order, OrderLineItem, Address, CreateOrderBody, TrackingEvent)
 export class OrdersController {
   @Get()
   @ApiOperation({ summary: 'List orders' })
@@ -29,20 +33,7 @@ export class OrdersController {
     schema: {
       type: 'object',
       properties: {
-        data: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: {
-              id: { type: 'string' },
-              status: { type: 'string', enum: ['pending', 'processing', 'shipped', 'delivered', 'cancelled', 'refunded'] },
-              total: { type: 'number' },
-              currency: { type: 'string' },
-              itemCount: { type: 'integer' },
-              createdAt: { type: 'string', format: 'date-time' },
-            },
-          },
-        },
+        data: { type: 'array', items: { $ref: getSchemaPath(Order) } },
         total: { type: 'integer' },
         page: { type: 'integer' },
       },
@@ -55,43 +46,7 @@ export class OrdersController {
   @Post()
   @ApiHeader({ name: 'x-idempotency-key', required: true })
   @ApiHeader({ name: 'x-store-id', required: true })
-  @ApiBody({
-    schema: {
-      type: 'object',
-      required: ['customerId', 'items', 'shippingAddress'],
-      properties: {
-        customerId: { type: 'string' },
-        items: {
-          type: 'array',
-          minItems: 1,
-          items: {
-            type: 'object',
-            required: ['productId', 'quantity'],
-            properties: {
-              productId: { type: 'string' },
-              variantId: { type: 'string' },
-              quantity: { type: 'integer', minimum: 1 },
-              unitPrice: { type: 'number' },
-            },
-          },
-        },
-        shippingAddress: {
-          type: 'object',
-          required: ['line1', 'city', 'country', 'postalCode'],
-          properties: {
-            line1: { type: 'string' },
-            line2: { type: 'string' },
-            city: { type: 'string' },
-            state: { type: 'string' },
-            country: { type: 'string', minLength: 2, maxLength: 2 },
-            postalCode: { type: 'string' },
-          },
-        },
-        couponCode: { type: 'string' },
-        metadata: { type: 'object', additionalProperties: true },
-      },
-    },
-  })
+  @ApiBody({ schema: { $ref: getSchemaPath(CreateOrderBody) } })
   @ApiCreatedResponse({ description: 'Order created.' })
   createOrder(@Body() body: any) {
     return { id: 'ord_1', status: 'pending', ...body };
@@ -155,7 +110,7 @@ export class OrdersController {
 
   @Get(':id')
   @ApiOperation({ summary: 'Get order details' })
-  @ApiOkResponse({ description: 'Order detail.' })
+  @ApiOkResponse({ description: 'Order detail.', schema: { $ref: getSchemaPath(Order) } })
   getOrder(@Param('id') id: string) {
     return { id, status: 'pending' };
   }
@@ -186,18 +141,7 @@ export class OrdersController {
   }
 
   @Post(':id/items')
-  @ApiBody({
-    schema: {
-      type: 'object',
-      required: ['productId', 'quantity'],
-      properties: {
-        productId: { type: 'string' },
-        variantId: { type: 'string' },
-        quantity: { type: 'integer', minimum: 1 },
-        unitPrice: { type: 'number' },
-      },
-    },
-  })
+  @ApiBody({ schema: { $ref: getSchemaPath(OrderLineItem) } })
   @ApiCreatedResponse({ description: 'Item added to order.' })
   addOrderItem(@Param('id') id: string, @Body() body: any) {
     return { orderId: id, item: body };
@@ -219,18 +163,7 @@ export class OrdersController {
         trackingNumber: { type: 'string' },
         carrier: { type: 'string' },
         estimatedDelivery: { type: 'string', format: 'date' },
-        events: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: {
-              timestamp: { type: 'string', format: 'date-time' },
-              location: { type: 'string' },
-              description: { type: 'string' },
-              status: { type: 'string' },
-            },
-          },
-        },
+        events: { type: 'array', items: { $ref: getSchemaPath(TrackingEvent) } },
       },
     },
   })

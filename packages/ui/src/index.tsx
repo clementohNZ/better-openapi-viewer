@@ -335,12 +335,41 @@ function LoadedViewerApp({
   specSwitcher,
 }: LoadedViewerAppProps) {
   const viewerConfig = useMemo(() => mergeViewerConfig(config, { persistAuthorization }), [config, persistAuthorization]);
-  const [query, setQuery] = useState('');
-  const [selectedMethods, setSelectedMethods] = useState<HttpMethod[]>([]);
-  const [selectedTags, setSelectedTags] = useState<string[]>([]);
-  const [authFilter, setAuthFilter] = useState<NonNullable<OperationFilter['auth']>>('any');
-  const [deprecatedFilter, setDeprecatedFilter] = useState('any');
-  const [selectedContentTypes, setSelectedContentTypes] = useState<string[]>([]);
+  const [query, setQuery] = useState(() => {
+    if (typeof window === 'undefined') return '';
+    return new URLSearchParams(window.location.search).get('q') ?? '';
+  });
+  const [selectedMethods, setSelectedMethods] = useState<HttpMethod[]>(() => {
+    if (typeof window === 'undefined') return [];
+    const raw = new URLSearchParams(window.location.search).get('method') ?? '';
+    return raw ? (raw.split(',') as HttpMethod[]) : [];
+  });
+  const [selectedTags, setSelectedTags] = useState<string[]>(() => {
+    if (typeof window === 'undefined') return [];
+    const raw = new URLSearchParams(window.location.search).get('tag') ?? '';
+    return raw ? raw.split(',') : [];
+  });
+  const [authFilter, setAuthFilter] = useState<NonNullable<OperationFilter['auth']>>(() => {
+    if (typeof window === 'undefined') return 'any';
+    const val = new URLSearchParams(window.location.search).get('auth');
+    return (val === 'required' || val === 'none' ? val : 'any') as NonNullable<OperationFilter['auth']>;
+  });
+  const [deprecatedFilter, setDeprecatedFilter] = useState(() => {
+    if (typeof window === 'undefined') return 'any';
+    const val = new URLSearchParams(window.location.search).get('status');
+    return val === 'active' || val === 'deprecated' ? val : 'any';
+  });
+  const [selectedContentTypes, setSelectedContentTypes] = useState<string[]>(() => {
+    if (typeof window === 'undefined') return [];
+    const raw = new URLSearchParams(window.location.search).get('ct') ?? '';
+    return raw ? raw.split(',') : [];
+  });
+  const [selectedModels, setSelectedModels] = useState<string[]>(() => {
+    if (typeof window === 'undefined') return [];
+    const raw = new URLSearchParams(window.location.search).get('model') ?? '';
+    return raw ? raw.split(',') : [];
+  });
+  const [modelsModalOpen, setModelsModalOpen] = useState(false);
   const tryItOutEnabled = true;
   const theme = preferences.theme;
   const showOnboarding = !preferences.onboardingCompleted;
@@ -378,9 +407,28 @@ function LoadedViewerApp({
     },
     [activeServer, setCookiesForServer],
   );
+  const operationModelRefs = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    for (const op of operations) {
+      const sourceOp = getSourceOperation(document, op);
+      const refs = new Set<string>();
+      if (sourceOp) {
+        const text = JSON.stringify(sourceOp);
+        for (const match of text.matchAll(/"#\/components\/schemas\/([^"]+)"/g)) {
+          refs.add(match[1]!);
+        }
+      }
+      map.set(op.id, refs);
+    }
+    return map;
+  }, [document, operations]);
   const methodOptions = useMemo(() => getCountedOptions(operations, (operation) => [operation.method]), [operations]);
   const tagOptions = useMemo(() => getCountedOptions(operations, (operation) => operation.tags), [operations]);
   const contentTypeOptions = useMemo(() => getCountedOptions(operations, (operation) => operation.contentTypes), [operations]);
+  const modelOptions = useMemo(
+    () => getCountedOptions(operations, (operation) => [...(operationModelRefs.get(operation.id) ?? [])]),
+    [operationModelRefs, operations],
+  );
   const authCounts = useMemo(
     () => ({
       required: operations.filter((operation) => operation.requiresAuth).length,
@@ -401,14 +449,15 @@ function LoadedViewerApp({
     selectedTags.length +
     Number(authFilter !== 'any') +
     Number(deprecatedFilter !== 'any') +
-    selectedContentTypes.length;
+    selectedContentTypes.length +
+    selectedModels.length;
   const filteredOperations = useMemo(
     () => {
       if (viewerConfig.filter === false) {
         return operations;
       }
 
-      return filterOperations(operations, {
+      let result = filterOperations(operations, {
         query,
         methods: selectedMethods,
         tags: selectedTags,
@@ -416,8 +465,15 @@ function LoadedViewerApp({
         deprecated: deprecatedFilter === 'any' ? undefined : deprecatedFilter === 'deprecated',
         contentTypes: selectedContentTypes,
       });
+      if (selectedModels.length) {
+        result = result.filter((op) => {
+          const refs = operationModelRefs.get(op.id);
+          return refs ? selectedModels.some((m) => refs.has(m)) : false;
+        });
+      }
+      return result;
     },
-    [authFilter, deprecatedFilter, operations, query, selectedContentTypes, selectedMethods, selectedTags, viewerConfig.filter],
+    [authFilter, deprecatedFilter, operationModelRefs, operations, query, selectedContentTypes, selectedMethods, selectedModels, selectedTags, viewerConfig.filter],
   );
   const groupedOperations = useMemo(
     () => sortOperationTags(groupOperationsByTag(filteredOperations, document.tags), viewerConfig.tagsSorter),
@@ -447,16 +503,34 @@ function LoadedViewerApp({
     setAuthFilter('any');
     setDeprecatedFilter('any');
     setSelectedContentTypes([]);
+    setSelectedModels([]);
+    if (typeof window !== 'undefined') {
+      window.history.replaceState(null, '', window.location.pathname + window.location.hash);
+    }
   };
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams();
+    if (query.trim()) params.set('q', query.trim());
+    if (selectedMethods.length) params.set('method', selectedMethods.join(','));
+    if (selectedTags.length) params.set('tag', selectedTags.join(','));
+    if (authFilter !== 'any') params.set('auth', authFilter);
+    if (deprecatedFilter !== 'any') params.set('status', deprecatedFilter);
+    if (selectedContentTypes.length) params.set('ct', selectedContentTypes.join(','));
+    if (selectedModels.length) params.set('model', selectedModels.join(','));
+    const search = params.toString();
+    const next = search ? `?${search}${window.location.hash}` : window.location.hash ? window.location.hash : window.location.pathname;
+    window.history.replaceState(null, '', next || window.location.pathname);
+  }, [query, selectedMethods, selectedTags, authFilter, deprecatedFilter, selectedContentTypes, selectedModels]);
+
   return (
     <main className="bov" data-theme={theme}>
       <div className="bov-shell">
         <aside className="bov-sidebar" aria-label="API navigation and filters">
           <header className="bov-product">
             <div className="bov-product-toolbar">
-              <div className="bov-product-toolbar-switcher">
-                {specs.length > 1 ? specSwitcher : null}
-              </div>
+              <div className="bov-product-toolbar-switcher">{specSwitcher}</div>
               <button
                 type="button"
                 className="bov-product-gear"
@@ -477,7 +551,7 @@ function LoadedViewerApp({
             <dl className="bov-stats" aria-label="Document summary">
               <Metric label="Ops" value={operations.length} />
               <Metric label="Tags" value={tagOptions.length} />
-              <Metric label="Models" value={Object.keys(componentSchemas).length} />
+              <Metric label="Models" value={Object.keys(componentSchemas).length} onClick={Object.keys(componentSchemas).length ? () => setModelsModalOpen(true) : undefined} />
             </dl>
           </header>
 
@@ -493,7 +567,14 @@ function LoadedViewerApp({
             <section className="bov-panel" aria-labelledby="endpoint-navigation-heading">
               <div className="bov-section-heading">
                 <h2 id="endpoint-navigation-heading">Filters</h2>
-                <span>{filteredOperations.length}/{operations.length}</span>
+                <div className="bov-section-heading-actions">
+                  {activeFilterCount ? (
+                    <button className="bov-reset-filters" type="button" onClick={resetFilters}>
+                      Reset ({activeFilterCount})
+                    </button>
+                  ) : null}
+                  <span>{filteredOperations.length}/{operations.length}</span>
+                </div>
               </div>
               <label className="bov-search bov-search-sidebar">
                 <span className="sr-only">Search endpoints</span>
@@ -573,15 +654,21 @@ function LoadedViewerApp({
                   ))}
                 </FilterFieldset>
               ) : null}
-              {activeFilterCount ? (
-                <button className="bov-button bov-button-quiet" type="button" onClick={resetFilters}>
-                  Reset filters ({activeFilterCount})
-                </button>
+              {modelOptions.length ? (
+                <FilterFieldset legend="Models">
+                  {modelOptions.map(({ value, count }) => (
+                    <CheckboxFilter
+                      key={value}
+                      label={value}
+                      count={count}
+                      checked={selectedModels.includes(value)}
+                      onChange={() => setSelectedModels((current) => toggleArrayValue(current, value))}
+                    />
+                  ))}
+                </FilterFieldset>
               ) : null}
             </section>
           )}
-
-          <Models schemas={componentSchemas} />
 
         </aside>
 
@@ -688,7 +775,72 @@ function LoadedViewerApp({
           onImport={onImport}
         />
       ) : null}
+      {modelsModalOpen ? (
+        <ModelsModal schemas={componentSchemas} onClose={() => setModelsModalOpen(false)} />
+      ) : null}
     </main>
+  );
+}
+
+function ModelsModal({ schemas, onClose }: { schemas: Record<string, unknown>; onClose: () => void }) {
+  const allNames = Object.keys(schemas);
+  const [search, setSearch] = useState('');
+  const [selected, setSelected] = useState(() => allNames[0] ?? null);
+
+  const filtered = search
+    ? allNames.filter((name) => name.toLowerCase().includes(search.toLowerCase()))
+    : allNames;
+
+  useEffect(() => {
+    if (filtered.length && (!selected || !filtered.includes(selected))) {
+      setSelected(filtered[0] ?? null);
+    }
+  }, [search]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <ModalShell labelledBy="bov-models-title" onClose={onClose} className="bov-models-modal">
+      <div className="bov-models-shell">
+        <div className="bov-models-sidebar">
+          <div className="bov-models-sidebar-header">
+            <h2 id="bov-models-title">Models</h2>
+            <span className="bov-models-count">{allNames.length}</span>
+          </div>
+          <label className="bov-search bov-models-search">
+            <span className="sr-only">Filter models</span>
+            <svg aria-hidden="true" viewBox="0 0 16 16" width="13" height="13"><circle cx="7" cy="7" r="5" fill="none" stroke="currentColor" strokeWidth="1.5"/><path d="M11 11l3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+            <input type="search" value={search} onChange={(e) => setSearch(e.currentTarget.value)} placeholder="Filter…" autoFocus />
+          </label>
+          <ul className="bov-models-list">
+            {filtered.length ? filtered.map((name) => (
+              <li key={name}>
+                <button
+                  type="button"
+                  className={`bov-models-list-item${selected === name ? ' bov-models-list-item--active' : ''}`}
+                  onClick={() => setSelected(name)}
+                >
+                  {name}
+                </button>
+              </li>
+            )) : <li className="bov-models-list-empty">No matches</li>}
+          </ul>
+        </div>
+        <div className="bov-models-detail">
+          {selected && schemas[selected] ? (
+            <>
+              <header className="bov-models-detail-header">
+                <code className="bov-models-detail-name">{selected}</code>
+                <button type="button" className="bov-detail-close" onClick={onClose} aria-label="Close">
+                  <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M3 3l10 10M13 3L3 13"/></svg>
+                </button>
+              </header>
+              <div className="bov-models-detail-body bov-detail-stack">
+                <SchemaTree schema={schemas[selected]} name={selected} />
+              </div>
+            </>
+          ) : null}
+        </div>
+      </div>
+    </ModalShell>
   );
 }
 
@@ -806,7 +958,17 @@ export type { OpenAPIObject };
 
 type CssVars = CSSProperties & Record<`--${string}`, string | number>;
 
-function Metric({ label, value }: { label: string; value: number }) {
+function Metric({ label, value, onClick }: { label: string; value: number; onClick?: () => void }) {
+  if (onClick) {
+    return (
+      <div>
+        <button type="button" className="bov-metric-button" onClick={onClick}>
+          <dt>{label}</dt>
+          <dd>{value}</dd>
+        </button>
+      </div>
+    );
+  }
   return (
     <div>
       <dt>{label}</dt>

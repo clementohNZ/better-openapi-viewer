@@ -3,6 +3,7 @@ import {
   ApiBearerAuth,
   ApiBody,
   ApiCreatedResponse,
+  ApiExtraModels,
   ApiHeader,
   ApiNoContentResponse,
   ApiOkResponse,
@@ -10,10 +11,13 @@ import {
   ApiQuery,
   ApiSecurity,
   ApiTags,
+  getSchemaPath,
 } from '@nestjs/swagger';
+import { CreateProductBody, Product, ProductImage, ProductInventory, ProductVariant, UpdateProductBody } from './products.dto.js';
 
 @ApiTags('products')
 @Controller('products')
+@ApiExtraModels(Product, ProductImage, ProductInventory, ProductVariant, CreateProductBody, UpdateProductBody)
 export class ProductsController {
   @Get()
   @ApiOperation({ summary: 'List products' })
@@ -31,21 +35,7 @@ export class ProductsController {
     schema: {
       type: 'object',
       properties: {
-        data: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: {
-              id: { type: 'string' },
-              name: { type: 'string' },
-              price: { type: 'number' },
-              currency: { type: 'string' },
-              category: { type: 'string' },
-              inStock: { type: 'boolean' },
-              rating: { type: 'number', minimum: 0, maximum: 5 },
-            },
-          },
-        },
+        data: { type: 'array', items: { $ref: getSchemaPath(Product) } },
         total: { type: 'integer' },
         page: { type: 'integer' },
         totalPages: { type: 'integer' },
@@ -64,45 +54,8 @@ export class ProductsController {
   @Post()
   @ApiBearerAuth()
   @ApiHeader({ name: 'x-idempotency-key', required: true, description: 'Unique key to prevent duplicate submissions.' })
-  @ApiBody({
-    schema: {
-      type: 'object',
-      required: ['name', 'price', 'currency'],
-      properties: {
-        name: { type: 'string', example: 'Ergonomic Keyboard' },
-        description: { type: 'string' },
-        price: { type: 'number', minimum: 0, example: 129.99 },
-        currency: { type: 'string', minLength: 3, maxLength: 3, example: 'USD' },
-        category: { type: 'string' },
-        tags: { type: 'array', items: { type: 'string' } },
-        images: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: {
-              url: { type: 'string', format: 'uri' },
-              alt: { type: 'string' },
-              isPrimary: { type: 'boolean' },
-            },
-          },
-        },
-        attributes: {
-          type: 'object',
-          additionalProperties: { type: 'string' },
-          example: { color: 'black', material: 'aluminum' },
-        },
-        inventory: {
-          type: 'object',
-          properties: {
-            quantity: { type: 'integer', minimum: 0 },
-            sku: { type: 'string' },
-            trackInventory: { type: 'boolean', default: true },
-          },
-        },
-      },
-    },
-  })
-  @ApiCreatedResponse({ description: 'Created product.' })
+  @ApiBody({ schema: { $ref: getSchemaPath(CreateProductBody) } })
+  @ApiCreatedResponse({ description: 'Created product.', schema: { $ref: getSchemaPath(Product) } })
   createProduct(@Body() body: any, @Headers('x-idempotency-key') idempotencyKey?: string) {
     return { id: 'prod_1', ...body };
   }
@@ -181,26 +134,15 @@ export class ProductsController {
   }
 
   @Get(':id')
-  @ApiOkResponse({ description: 'Product detail.' })
+  @ApiOkResponse({ description: 'Product detail.', schema: { $ref: getSchemaPath(Product) } })
   getProduct(@Param('id') id: string) {
     return { id, name: 'Ergonomic Keyboard', price: 129.99, currency: 'USD' };
   }
 
   @Patch(':id')
   @ApiBearerAuth()
-  @ApiBody({
-    schema: {
-      type: 'object',
-      properties: {
-        name: { type: 'string' },
-        description: { type: 'string' },
-        price: { type: 'number', minimum: 0 },
-        tags: { type: 'array', items: { type: 'string' } },
-        isPublished: { type: 'boolean' },
-      },
-    },
-  })
-  @ApiOkResponse({ description: 'Updated product.' })
+  @ApiBody({ schema: { $ref: getSchemaPath(UpdateProductBody) } })
+  @ApiOkResponse({ description: 'Updated product.', schema: { $ref: getSchemaPath(Product) } })
   updateProduct(@Param('id') id: string, @Body() body: any) {
     return { id, ...body };
   }
@@ -218,16 +160,7 @@ export class ProductsController {
     description: 'Product variants.',
     schema: {
       type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          id: { type: 'string' },
-          sku: { type: 'string' },
-          attributes: { type: 'object', additionalProperties: { type: 'string' } },
-          price: { type: 'number' },
-          quantity: { type: 'integer' },
-        },
-      },
+      items: { $ref: getSchemaPath(ProductVariant) },
     },
   })
   getVariants(@Param('id') id: string) {
@@ -248,7 +181,7 @@ export class ProductsController {
       },
     },
   })
-  @ApiCreatedResponse({ description: 'Created variant.' })
+  @ApiCreatedResponse({ description: 'Created variant.', schema: { $ref: getSchemaPath(ProductVariant) } })
   createVariant(@Param('id') id: string, @Body() body: any) {
     return { id: 'var_1', productId: id, ...body };
   }

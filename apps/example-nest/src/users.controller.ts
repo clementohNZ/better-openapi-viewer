@@ -1,29 +1,43 @@
 import { Body, Controller, Delete, Get, Headers, Param, Patch, Post, Query } from '@nestjs/common';
-import { ApiBearerAuth, ApiBody, ApiCreatedResponse, ApiHeader, ApiNoContentResponse, ApiOkResponse, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
-
-type CreateUserDto = {
-  name: string;
-  email: string;
-  role?: 'admin' | 'member';
-};
-
-type UpdateUserDto = Partial<CreateUserDto>;
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiCreatedResponse,
+  ApiExtraModels,
+  ApiHeader,
+  ApiNoContentResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiQuery,
+  ApiTags,
+  getSchemaPath,
+} from '@nestjs/swagger';
+import { CreateUserBody, UpdateUserBody, User } from './users.dto.js';
 
 @ApiTags('users')
 @Controller('users')
+@ApiExtraModels(User, CreateUserBody, UpdateUserBody)
 export class UsersController {
   @Get()
   @ApiOperation({ summary: 'List users' })
   @ApiQuery({ name: 'search', required: false })
   @ApiQuery({ name: 'role', enum: ['admin', 'member'], required: false })
   @ApiHeader({ name: 'x-request-id', required: false })
-  @ApiOkResponse({ description: 'List users.' })
+  @ApiOkResponse({
+    description: 'List of users.',
+    schema: {
+      type: 'object',
+      properties: {
+        data: { type: 'array', items: { $ref: getSchemaPath(User) } },
+      },
+    },
+  })
   listUsers(@Query('search') search?: string, @Query('role') role?: string, @Headers('x-request-id') requestId?: string) {
     return {
       requestId,
       data: [
-        { id: 'usr_1', name: 'Ada Lovelace', role: 'admin' },
-        { id: 'usr_2', name: 'Grace Hopper', role: 'member' },
+        { id: 'usr_1', name: 'Ada Lovelace', email: 'ada@example.com', role: 'admin' },
+        { id: 'usr_2', name: 'Grace Hopper', email: 'grace@example.com', role: 'member' },
       ].filter((user) => (!search || user.name.toLowerCase().includes(search.toLowerCase())) && (!role || user.role === role)),
     };
   }
@@ -31,19 +45,12 @@ export class UsersController {
   @Post()
   @ApiOperation({ summary: 'Create a new user' })
   @ApiBearerAuth()
-  @ApiBody({
-    schema: {
-      type: 'object',
-      required: ['name', 'email'],
-      properties: {
-        name: { type: 'string', example: 'Katherine Johnson' },
-        email: { type: 'string', format: 'email', example: 'katherine@example.com' },
-        role: { type: 'string', enum: ['admin', 'member'], default: 'member' },
-      },
-    },
+  @ApiBody({ schema: { $ref: getSchemaPath(CreateUserBody) } })
+  @ApiCreatedResponse({
+    description: 'Created user.',
+    schema: { $ref: getSchemaPath(User) },
   })
-  @ApiCreatedResponse({ description: 'Created user.' })
-  createUser(@Body() body: CreateUserDto) {
+  createUser(@Body() body: CreateUserBody) {
     return { id: 'usr_3', role: 'member', ...body };
   }
 
@@ -52,52 +59,43 @@ export class UsersController {
   @ApiQuery({ name: 'role', enum: ['admin', 'member'], required: false })
   @ApiQuery({ name: 'limit', required: false, schema: { type: 'integer', minimum: 1, maximum: 100, default: 25 } })
   @ApiQuery({ name: 'tag', required: false, isArray: true, description: 'Repeat to filter by multiple tags.' })
-  @ApiOkResponse({ description: 'Search users with required query parameters.' })
-  searchUsers(
-    @Query('q') q: string,
-    @Query('role') role?: string,
-    @Query('limit') limit?: string,
-    @Query('tag') tag?: string | string[],
-  ) {
+  @ApiOkResponse({
+    description: 'Search results.',
+    schema: {
+      type: 'object',
+      properties: {
+        data: { type: 'array', items: { $ref: getSchemaPath(User) } },
+        total: { type: 'integer' },
+      },
+    },
+  })
+  searchUsers(@Query('q') q: string, @Query('role') role?: string, @Query('limit') limit?: string, @Query('tag') tag?: string | string[]) {
     return {
       query: q,
-      role,
-      limit: limit ? Number(limit) : 25,
-      tags: Array.isArray(tag) ? tag : tag ? [tag] : [],
-      data: [
-        { id: 'usr_1', name: 'Ada Lovelace', role: 'admin' },
-        { id: 'usr_2', name: 'Grace Hopper', role: 'member' },
-      ].filter((user) => user.name.toLowerCase().includes(q.toLowerCase()) && (!role || user.role === role)),
+      data: [{ id: 'usr_1', name: 'Ada Lovelace', email: 'ada@example.com', role: 'admin' }],
+      total: 1,
     };
   }
 
   @Get(':id')
-  @ApiOkResponse({ description: 'Get a user by id.' })
+  @ApiOperation({ summary: 'Get a user by ID' })
+  @ApiOkResponse({ description: 'User detail.', schema: { $ref: getSchemaPath(User) } })
   getUser(@Param('id') id: string) {
-    return { id, name: 'Ada Lovelace' };
+    return { id, name: 'Ada Lovelace', email: 'ada@example.com', role: 'admin' };
   }
 
   @Patch(':id')
   @ApiBearerAuth()
-  @ApiBody({
-    schema: {
-      type: 'object',
-      properties: {
-        name: { type: 'string' },
-        email: { type: 'string', format: 'email' },
-        role: { type: 'string', enum: ['admin', 'member'] },
-      },
-    },
-  })
-  @ApiOkResponse({ description: 'Updated user.' })
-  updateUser(@Param('id') id: string, @Body() body: UpdateUserDto) {
+  @ApiBody({ schema: { $ref: getSchemaPath(UpdateUserBody) } })
+  @ApiOkResponse({ description: 'Updated user.', schema: { $ref: getSchemaPath(User) } })
+  updateUser(@Param('id') id: string, @Body() body: UpdateUserBody) {
     return { id, ...body };
   }
 
   @Delete(':id')
   @ApiBearerAuth()
-  @ApiNoContentResponse({ description: 'Deleted user.' })
+  @ApiNoContentResponse({ description: 'User deleted.' })
   deleteUser(@Param('id') id: string) {
-    return { id, deleted: true };
+    return;
   }
 }

@@ -4,7 +4,7 @@
   "packageManager": "npm@10.9.0",
   "scripts": {
     "build": "turbo run build",
-    "dev": "turbo run dev --parallel",
+    "dev": "turbo run dev --parallel --filter=!example-core",
     "lint": "turbo run lint",
     "pack:check": "npm run build && npm pack --workspace @clementoh/better-openapi-viewer-core --workspace @clementoh/better-openapi-viewer-ui --workspace @clementoh/better-openapi-viewer-nestjs --dry-run",
     "typecheck": "turbo run typecheck",

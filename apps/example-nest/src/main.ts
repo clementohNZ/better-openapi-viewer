@@ -7,6 +7,7 @@ import { AppModule } from './app.module.js';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  app.enableCors();
   const config = new DocumentBuilder()
     .setTitle('Example API')
     .setDescription('Demo API for Better OpenAPI Viewer development.')
@@ -23,6 +24,8 @@ async function bootstrap() {
     jsonPath: 'docs/openapi.json',
     document,
   });
+
+  SwaggerModule.setup('swagger', app, document);
 
   await app.listen(process.env.PORT ? Number(process.env.PORT) : 3000);
 }
