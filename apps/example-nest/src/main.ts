@@ -12,6 +12,7 @@ async function bootstrap() {
     .setDescription('Demo API for Better OpenAPI Viewer development.')
     .setVersion('0.0.0')
     .addBearerAuth()
+    .addApiKey({ type: 'apiKey', in: 'header', name: 'x-api-key' }, 'apiKey')
     .addServer('http://localhost:3000', 'Local development')
     .addServer('/api', 'Relative API prefix')
     .build();
