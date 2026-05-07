@@ -14,7 +14,7 @@ const require = createRequire(import.meta.url);
 
 await mkdir(dist, { recursive: true });
 
-const uiBrowserCss = require.resolve('@clem/better-openapi-viewer-ui/browser-style');
+const uiBrowserCss = require.resolve('@clementoh/better-openapi-viewer-ui/browser-style');
 await copyFile(uiBrowserCss, path.join(dist, 'viewer.css'));
 await copyFile(path.join(root, 'src/index.html'), path.join(dist, 'index.html'));
 

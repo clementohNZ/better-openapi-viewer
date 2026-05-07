@@ -1,6 +1,6 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { BetterOpenApiViewer } from '@clem/better-openapi-viewer-ui';
+import { BetterOpenApiViewer } from '@clementoh/better-openapi-viewer-ui';
 
 const target = document.querySelector('[data-better-openapi-viewer-root]');
 const config = window.__BETTER_OPENAPI_VIEWER_CONFIG__ ?? {};
