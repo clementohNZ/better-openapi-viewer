@@ -56,7 +56,7 @@ import {
   type TryItOutRequest,
   type TryItOutRequestSnippetLanguage,
   type ViewerConfig,
-} from '@clem/better-openapi-viewer-core';
+} from '@clementoh/better-openapi-viewer-core';
 
 export type HostSpec = {
   id?: string;

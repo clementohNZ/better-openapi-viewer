@@ -1,5 +1,5 @@
 {
-  "name": "@clem/better-openapi-viewer-ui",
+  "name": "@clementoh/better-openapi-viewer-ui",
   "version": "0.1.0",
   "description": "React UI for Better OpenAPI Viewer.",
   "type": "module",
@@ -32,7 +32,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@clem/better-openapi-viewer-core": "0.1.0",
+    "@clementoh/better-openapi-viewer-core": "0.1.0",
     "@codemirror/commands": "^6.10.3",
     "@codemirror/lang-json": "^6.0.2",
     "@codemirror/language": "^6.12.3",

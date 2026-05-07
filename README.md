@@ -63,9 +63,9 @@ A richer, more usable OpenAPI reference and try-it-out client — built as a dro
 
 | Package | Description |
 |---|---|
-| [`@clem/better-openapi-viewer-core`](packages/core) | Framework-agnostic OpenAPI normalisation and viewer primitives |
-| [`@clem/better-openapi-viewer-ui`](packages/ui) | React viewer UI, published as both an npm package and a self-contained browser bundle |
-| [`@clem/better-openapi-viewer-nestjs`](packages/nestjs) | NestJS adapter — mounts the viewer and serves the OpenAPI JSON |
+| [`@clementoh/better-openapi-viewer-core`](packages/core) | Framework-agnostic OpenAPI normalisation and viewer primitives |
+| [`@clementoh/better-openapi-viewer-ui`](packages/ui) | React viewer UI, published as both an npm package and a self-contained browser bundle |
+| [`@clementoh/better-openapi-viewer-nestjs`](packages/nestjs) | NestJS adapter — mounts the viewer and serves the OpenAPI JSON |
 
 ---
 
@@ -74,10 +74,10 @@ A richer, more usable OpenAPI reference and try-it-out client — built as a dro
 ### NestJS
 
 ```bash
-npm install @clem/better-openapi-viewer-nestjs
+npm install @clementoh/better-openapi-viewer-nestjs
 ```
 
-`@clem/better-openapi-viewer-core` and `@clem/better-openapi-viewer-ui` are bundled inside `@clem/better-openapi-viewer-nestjs` — you do not need to install them separately.
+`@clementoh/better-openapi-viewer-core` and `@clementoh/better-openapi-viewer-ui` are bundled inside `@clementoh/better-openapi-viewer-nestjs` — you do not need to install them separately.
 
 ---
 
@@ -89,7 +89,7 @@ npm install @clem/better-openapi-viewer-nestjs
 // main.ts
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import { setupBetterOpenApiViewer } from '@clem/better-openapi-viewer-nestjs';
+import { setupBetterOpenApiViewer } from '@clementoh/better-openapi-viewer-nestjs';
 import { AppModule } from './app.module.js';
 
 async function bootstrap() {
@@ -216,12 +216,12 @@ If no `?spec=` is provided, the viewer shows an empty state with a form to paste
 
 ### Drop-in browser bundle
 
-`@clem/better-openapi-viewer-ui` ships a prebuilt browser bundle that renders the viewer from a plain HTML page — no React, no bundler, no build step required. This is what the NestJS adapter serves under the hood, and you can do the same from any HTTP server (Express, Fastify, Go, nginx, a Python script, …).
+`@clementoh/better-openapi-viewer-ui` ships a prebuilt browser bundle that renders the viewer from a plain HTML page — no React, no bundler, no build step required. This is what the NestJS adapter serves under the hood, and you can do the same from any HTTP server (Express, Fastify, Go, nginx, a Python script, …).
 
 Install (or copy) the two files served alongside your HTML:
 
-- `node_modules/@clem/better-openapi-viewer-ui/dist/browser/viewer.js`
-- `node_modules/@clem/better-openapi-viewer-ui/dist/browser/viewer.css`
+- `node_modules/@clementoh/better-openapi-viewer-ui/dist/browser/viewer.js`
+- `node_modules/@clementoh/better-openapi-viewer-ui/dist/browser/viewer.css`
 
 Then write an HTML page that points at one or more OpenAPI documents:
 
@@ -262,12 +262,12 @@ The bundle reads `window.__BETTER_OPENAPI_VIEWER_CONFIG__` on load, fetches the 
 If you already have a React app, install the UI package and render `<BetterOpenApiViewer />` directly. You control how the spec is loaded (bundled JSON, fetched, generated, …) and you can pass it in pre-parsed.
 
 ```bash
-npm install @clem/better-openapi-viewer-ui react react-dom
+npm install @clementoh/better-openapi-viewer-ui react react-dom
 ```
 
 ```tsx
-import { BetterOpenApiViewer } from '@clem/better-openapi-viewer-ui';
-import '@clem/better-openapi-viewer-ui/browser-style';
+import { BetterOpenApiViewer } from '@clementoh/better-openapi-viewer-ui';
+import '@clementoh/better-openapi-viewer-ui/browser-style';
 import openapi from './openapi.json';
 
 export function ApiDocsPage() {
@@ -370,7 +370,7 @@ All three packages are versioned together. Adapters pin exact versions of `core`
 
 ```bash
 npm run pack:check   # verify what would be published
-npm publish --workspace @clem/better-openapi-viewer-core
-npm publish --workspace @clem/better-openapi-viewer-ui
-npm publish --workspace @clem/better-openapi-viewer-nestjs
+npm publish --workspace @clementoh/better-openapi-viewer-core
+npm publish --workspace @clementoh/better-openapi-viewer-ui
+npm publish --workspace @clementoh/better-openapi-viewer-nestjs
 ```
