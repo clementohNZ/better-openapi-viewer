@@ -95,7 +95,7 @@
   .bov-shell {
     @apply grid h-full;
     width: 100%;
-    grid-template-columns: var(--bov-sidebar-width, 260px) 4px var(--bov-content-width, minmax(360px, 1fr)) 4px minmax(420px, 1.4fr);
+    grid-template-columns: minmax(min-content, var(--bov-sidebar-width, 260px)) 4px var(--bov-content-width, minmax(360px, 1fr)) 4px minmax(420px, 1.4fr);
     min-width: 0;
   }
 
@@ -230,7 +230,7 @@
 
   .bov-models-shell {
     display: grid;
-    grid-template-columns: 220px 1fr;
+    grid-template-columns: minmax(220px, max-content) minmax(0, 1fr);
     min-height: 560px;
     max-height: min(82vh, 780px);
     overflow: hidden;
@@ -393,7 +393,7 @@
   }
 
   .bov-filter-option span {
-    @apply min-w-0 flex-1 truncate;
+    @apply flex-1;
   }
 
   .bov-filter-option small {

@@ -12,12 +12,12 @@ import {
   ApiTags,
   getSchemaPath,
 } from '@nestjs/swagger';
-import { Address, CreateOrderBody, Order, OrderLineItem, TrackingEvent } from './orders.dto.js';
+import { Address, CreateOrderBody, Order, OrderLineItem, ShipmentTrackingEventNotificationDelivery } from './orders.dto.js';
 
 @ApiTags('orders')
 @ApiBearerAuth()
 @Controller('orders')
-@ApiExtraModels(Order, OrderLineItem, Address, CreateOrderBody, TrackingEvent)
+@ApiExtraModels(Order, OrderLineItem, Address, CreateOrderBody, ShipmentTrackingEventNotificationDelivery)
 export class OrdersController {
   @Get()
   @ApiOperation({ summary: 'List orders' })
@@ -170,7 +170,7 @@ export class OrdersController {
         trackingNumber: { type: 'string' },
         carrier: { type: 'string' },
         estimatedDelivery: { type: 'string', format: 'date' },
-        events: { type: 'array', items: { $ref: getSchemaPath(TrackingEvent) } },
+        events: { type: 'array', items: { $ref: getSchemaPath(ShipmentTrackingEventNotificationDelivery) } },
       },
     },
   })

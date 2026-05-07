@@ -12,11 +12,11 @@ import {
   ApiTags,
   getSchemaPath,
 } from '@nestjs/swagger';
-import { CreateUserBody, UpdateUserBody, User } from './users.dto.js';
+import { CreateUserBody, UpdatePlanningSetupSegmentBody, User } from './users.dto.js';
 
 @ApiTags('users')
 @Controller('users')
-@ApiExtraModels(User, CreateUserBody, UpdateUserBody)
+@ApiExtraModels(User, CreateUserBody, UpdatePlanningSetupSegmentBody)
 export class UsersController {
   @Get()
   @ApiOperation({ summary: 'List users' })
@@ -88,9 +88,9 @@ export class UsersController {
   @Patch(':id')
   @ApiOperation({ summary: 'Update a user' })
   @ApiBearerAuth()
-  @ApiBody({ schema: { $ref: getSchemaPath(UpdateUserBody) } })
+  @ApiBody({ schema: { $ref: getSchemaPath(UpdatePlanningSetupSegmentBody) } })
   @ApiOkResponse({ description: 'Updated user.', schema: { $ref: getSchemaPath(User) } })
-  updateUser(@Param('id') id: string, @Body() body: UpdateUserBody) {
+  updateUser(@Param('id') id: string, @Body() body: UpdatePlanningSetupSegmentBody) {
     return { id, ...body };
   }
 

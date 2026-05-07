@@ -68,7 +68,7 @@ export class CreateOrderBody {
   couponCode?: string;
 }
 
-export class TrackingEvent {
+export class ShipmentTrackingEventNotificationDelivery {
   @ApiProperty({ format: 'date-time' })
   timestamp!: string;
 

@@ -25,7 +25,7 @@ export class CreateUserBody {
   role?: 'admin' | 'member';
 }
 
-export class UpdateUserBody {
+export class UpdatePlanningSetupSegmentBody {
   @ApiProperty({ required: false })
   name?: string;
 

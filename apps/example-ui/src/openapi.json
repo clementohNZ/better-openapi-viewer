@@ -32,6 +32,21 @@
           "bookId": { "type": "string", "format": "uuid" },
           "quantity": { "type": "integer", "minimum": 1 }
         }
+      },
+      "UpdatePlanningSetupSegmentBody": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string" },
+          "notes": { "type": "string" }
+        }
+      },
+      "ShipmentTrackingEventNotificationDelivery": {
+        "type": "object",
+        "properties": {
+          "timestamp": { "type": "string", "format": "date-time" },
+          "location": { "type": "string" },
+          "description": { "type": "string" }
+        }
       }
     }
   },
@@ -91,6 +106,30 @@
         "responses": {
           "201": { "description": "Order accepted" },
           "401": { "description": "Unauthorized" }
+        }
+      }
+    },
+    "/planning/{id}": {
+      "patch": {
+        "operationId": "updatePlanningSetupSegment",
+        "summary": "Update planning setup segment",
+        "tags": ["orders"],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/UpdatePlanningSetupSegmentBody" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ShipmentTrackingEventNotificationDelivery" } }
+            }
+          }
         }
       }
     }
