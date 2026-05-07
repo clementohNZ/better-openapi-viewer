@@ -46,6 +46,7 @@ A richer, more usable OpenAPI reference and try-it-out client — built as a dro
 - **Generated snippets** — curl and other language snippets generated from the current inputs
 - **Multiple specs** — mount several OpenAPI documents under one viewer with tab navigation
 - **Dark / light appearance** — follows the OS preference by default, overridable in Settings
+- **Always in sync** — reads directly from your live OpenAPI JSON on every load, so there's no HTTP client collection (Postman, HTTPie, Insomnia, etc.) to keep up to date as your API evolves
 - **Zero external CDN** — all assets (JS + CSS) are bundled and served from your own server
 
 ---
