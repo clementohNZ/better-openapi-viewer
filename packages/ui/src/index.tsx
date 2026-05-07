@@ -15,7 +15,9 @@ import { EditorState } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { json as jsonLanguage } from '@codemirror/lang-json';
+import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { linter, lintGutter } from '@codemirror/lint';
+import { tags as t } from '@lezer/highlight';
 import {
   buildTryItOutRequest,
   filterOperations,
@@ -816,7 +818,10 @@ function Metric({ label, value }: { label: string; value: number }) {
 function EmptyState({ body, title }: { body: string; title: string }) {
   return (
     <div className="bov-empty">
-      <span aria-hidden="true" />
+      <svg aria-hidden="true" viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="11" cy="11" r="7" />
+        <path d="m20 20-3.5-3.5" />
+      </svg>
       <h3>{title}</h3>
       <p>{body}</p>
     </div>
@@ -1067,19 +1072,26 @@ function Responses({ operation, document }: { operation: NormalizedOperation; do
           {responses.map((response) => (
             <li key={response.statusCode}>
               <article>
-                <h5>
-                  <code>{response.statusCode}</code> {getResponseStatusLabel(response.statusRange, response.category)}
-                </h5>
-                {response.description ? <MarkdownText value={response.description} /> : null}
-                {response.contentTypes.length ? (
-                  <ul>
-                    {response.contentTypes.map((contentType) => (
-                      <li key={contentType}>
-                        <code>{contentType}</code>
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
+                <div className="bov-response-header">
+                  <div className="bov-response-header-main">
+                    <h5>
+                      <code className="bov-status-code" data-status-range={response.statusRange}>
+                        {response.statusCode}
+                      </code>{' '}
+                      {getResponseStatusLabel(response.statusRange, response.category)}
+                    </h5>
+                    {response.description ? <MarkdownText value={response.description} /> : null}
+                  </div>
+                  {response.contentTypes.length ? (
+                    <ul className="bov-response-content-types">
+                      {response.contentTypes.map((contentType) => (
+                        <li key={contentType}>
+                          <code>{contentType}</code>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
                 {response.schema ? <SchemaTree schema={response.schema} name={`${response.statusCode} response`} /> : null}
                 {response.example !== undefined ? (
                   <details>
@@ -1955,31 +1967,9 @@ function RequestBodyEditor({
     }
   }, [bodyText, isJson]);
 
-  const formatJson = () => {
-    try {
-      const parsed = JSON.parse(bodyText);
-      onChange(JSON.stringify(parsed, null, 2));
-    } catch {
-      // ignore — error is already shown
-    }
-  };
-
   return (
     <fieldset className="bov-try-body">
       <legend>Request body</legend>
-      <div className="bov-try-body-toolbar">
-        {isJson ? (
-          <button
-            type="button"
-            className="bov-button bov-button-quiet"
-            onClick={formatJson}
-            disabled={!bodyText.trim() || Boolean(parseError)}
-            title="Format JSON (2-space indent)"
-          >
-            Format
-          </button>
-        ) : null}
-      </div>
       {isJson ? (
         <JsonEditor value={bodyText} onChange={onChange} />
       ) : (
@@ -2011,6 +2001,7 @@ function JsonEditor({ value, onChange }: { value: string; onChange: (value: stri
           history(),
           keymap.of([...defaultKeymap, ...historyKeymap]),
           jsonLanguage(),
+          syntaxHighlighting(jsonHighlightStyle),
           jsonLinter(),
           lintGutter(),
           EditorView.lineWrapping,
@@ -2068,6 +2059,18 @@ function JsonEditor({ value, onChange }: { value: string; onChange: (value: stri
 
   return <div ref={containerRef} className="bov-json-editor" />;
 }
+
+const jsonHighlightStyle = HighlightStyle.define([
+  { tag: t.propertyName, color: 'var(--bov-json-key, #6b4ec1)' },
+  { tag: t.string, color: 'var(--bov-json-string, #0a7c5a)' },
+  { tag: t.number, color: 'var(--bov-json-number, #1d4ed8)' },
+  { tag: t.bool, color: 'var(--bov-json-bool, #a35c00)' },
+  { tag: t.null, color: 'var(--bov-json-null, #b03a3a)' },
+  { tag: t.separator, color: 'var(--bov-faint)' },
+  { tag: t.bracket, color: 'var(--bov-muted)' },
+  { tag: t.brace, color: 'var(--bov-muted)' },
+  { tag: t.squareBracket, color: 'var(--bov-muted)' },
+]);
 
 function jsonLinter() {
   return linter((view) => {
@@ -2193,7 +2196,10 @@ function TryItOutResult({ displayRequestDuration, state }: { displayRequestDurat
         <div>
           <dt>Status</dt>
           <dd>
-            {state.response.status} {state.response.statusText}
+            <code className="bov-status-code" data-status-range={statusRangeFor(state.response.status)}>
+              {state.response.status}
+            </code>{' '}
+            {state.response.statusText}
           </dd>
         </div>
         {displayRequestDuration ? (
@@ -2516,6 +2522,15 @@ function getSourceOperation(document: OpenAPIObject, operation: NormalizedOperat
 
 function getOperationProduces(document: OpenAPIObject, operation: NormalizedOperation): string[] {
   return getSourceOperation(document, operation)?.produces ?? document.produces ?? [];
+}
+
+function statusRangeFor(status: number): string {
+  if (status >= 100 && status < 200) return '1xx';
+  if (status >= 200 && status < 300) return '2xx';
+  if (status >= 300 && status < 400) return '3xx';
+  if (status >= 400 && status < 500) return '4xx';
+  if (status >= 500 && status < 600) return '5xx';
+  return 'unknown';
 }
 
 function getResponseStatusLabel(statusRange: string, category: string) {
@@ -2971,7 +2986,7 @@ function ModalShell({
   );
 }
 
-type SettingsTab = 'appearance' | 'servers' | 'cookies' | 'specs' | 'data';
+type SettingsTab = 'appearance' | 'servers' | 'cookies' | 'specs' | 'data' | 'credits';
 
 const SETTINGS_TABS: Array<{ id: SettingsTab; label: string; requiresDocument?: boolean }> = [
   { id: 'appearance', label: 'Appearance' },
@@ -2979,6 +2994,7 @@ const SETTINGS_TABS: Array<{ id: SettingsTab; label: string; requiresDocument?: 
   { id: 'servers', label: 'Servers', requiresDocument: true },
   { id: 'cookies', label: 'Cookies', requiresDocument: true },
   { id: 'data', label: 'Data' },
+  { id: 'credits', label: 'Credits' },
 ];
 
 type SettingsModalProps = {
@@ -3091,6 +3107,8 @@ function SettingsModal(props: SettingsModalProps) {
               />
             ) : effectiveTab === 'data' ? (
               <DataTab userSpecs={userSpecs} hostSpecs={hostSpecs} onImport={onImport} />
+            ) : effectiveTab === 'credits' ? (
+              <CreditsTab />
             ) : null}
           </div>
         </div>
@@ -4620,6 +4638,45 @@ function DataTab({
         </button>
         {importError ? <p className="bov-error">{importError}</p> : null}
         {importStatus ? <p className="bov-muted">{importStatus}</p> : null}
+      </fieldset>
+    </div>
+  );
+}
+
+function CreditsTab() {
+  return (
+    <div className="bov-settings-section bov-credits-tab">
+      <fieldset className="bov-pref-group">
+        <legend>Hey there</legend>
+        <p className="bov-pref-help">
+          Better OpenAPI Viewer is lovingly hand-crafted by Clem.
+        </p>
+      </fieldset>
+      <fieldset className="bov-pref-group">
+        <legend>A cheeky ask 🥺</legend>
+        <p className="bov-pref-help">
+          If this little tool saved you some time, wouldn't mind a cheeky follow. No pressure!
+        </p>
+        <div className="bov-credits-links">
+          <a
+            className="bov-credits-link"
+            href="https://github.com/clementohNZ"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <span className="bov-credits-link-label">GitHub</span>
+            <span className="bov-credits-link-handle">@clementohNZ</span>
+          </a>
+          <a
+            className="bov-credits-link"
+            href="https://x.com/clembuildsstuff"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <span className="bov-credits-link-label">X</span>
+            <span className="bov-credits-link-handle">@clembuildsstuff</span>
+          </a>
+        </div>
       </fieldset>
     </div>
   );
