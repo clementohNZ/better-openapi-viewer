@@ -42,7 +42,7 @@ import {
   type TryItOutRequest,
   type TryItOutRequestSnippetLanguage,
   type ViewerConfig,
-} from '@clem/core';
+} from '@clem/better-openapi-viewer-core';
 
 export type BetterOpenApiViewerProps = {
   document: OpenAPIObject;

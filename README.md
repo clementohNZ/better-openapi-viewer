@@ -38,9 +38,9 @@ A richer, more usable OpenAPI reference and try-it-out client — built as a dro
 
 | Package | Description |
 |---|---|
-| [`@clem/core`](packages/core) | Framework-agnostic OpenAPI normalisation and viewer primitives |
-| [`@clem/ui`](packages/ui) | React viewer UI, published as both an npm package and a self-contained browser bundle |
-| [`@clem/nestjs`](packages/nestjs) | NestJS adapter — mounts the viewer and serves the OpenAPI JSON |
+| [`@clem/better-openapi-viewer-core`](packages/core) | Framework-agnostic OpenAPI normalisation and viewer primitives |
+| [`@clem/better-openapi-viewer-ui`](packages/ui) | React viewer UI, published as both an npm package and a self-contained browser bundle |
+| [`@clem/better-openapi-viewer-nestjs`](packages/nestjs) | NestJS adapter — mounts the viewer and serves the OpenAPI JSON |
 
 ---
 
@@ -49,10 +49,10 @@ A richer, more usable OpenAPI reference and try-it-out client — built as a dro
 ### NestJS
 
 ```bash
-npm install @clem/nestjs
+npm install @clem/better-openapi-viewer-nestjs
 ```
 
-`@clem/core` and `@clem/ui` are bundled inside `@clem/nestjs` — you do not need to install them separately.
+`@clem/better-openapi-viewer-core` and `@clem/better-openapi-viewer-ui` are bundled inside `@clem/better-openapi-viewer-nestjs` — you do not need to install them separately.
 
 ---
 
@@ -64,7 +64,7 @@ npm install @clem/nestjs
 // main.ts
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import { setupBetterOpenApiViewer } from '@clem/nestjs';
+import { setupBetterOpenApiViewer } from '@clem/better-openapi-viewer-nestjs';
 import { AppModule } from './app.module.js';
 
 async function bootstrap() {
@@ -196,7 +196,7 @@ All three packages are versioned together. Adapters pin exact versions of `core`
 
 ```bash
 npm run pack:check   # verify what would be published
-npm publish --workspace @clem/core
-npm publish --workspace @clem/ui
-npm publish --workspace @clem/nestjs
+npm publish --workspace @clem/better-openapi-viewer-core
+npm publish --workspace @clem/better-openapi-viewer-ui
+npm publish --workspace @clem/better-openapi-viewer-nestjs
 ```
