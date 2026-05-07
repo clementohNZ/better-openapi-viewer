@@ -4,6 +4,22 @@ A richer, more usable OpenAPI reference and try-it-out client — built as a dro
 
 ---
 
+## Table of contents
+
+- [Screenshots](#screenshots)
+- [Features](#features)
+- [Packages](#packages)
+- [Installation](#installation)
+- [NestJS integration](#nestjs-integration)
+  - [Minimal setup](#minimal-setup)
+  - [Options reference](#options-reference)
+  - [Multiple specs](#multiple-specs)
+- [Development](#development)
+- [Workspace layout](#workspace-layout)
+- [Publishing](#publishing)
+
+---
+
 ## Screenshots
 
 **Operations list & Reference panel**
