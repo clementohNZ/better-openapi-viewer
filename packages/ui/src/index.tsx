@@ -1874,7 +1874,18 @@ function TryItOut({
     }));
   }, [activeServer?.id, activeServer?.url, activeServer?.variables]);
 
-  const authCredentials = activeServer?.credentials ?? {};
+  const requestUrlForOrigin = useMemo(
+    () => buildTryItOutRequestForState({ authCredentials: {}, document, operation, state }).url,
+    [document, operation, state.parameters, state.serverUrl, state.serverVariables],
+  );
+  const requestOrigin = useMemo(() => getRequestOrigin(requestUrlForOrigin), [requestUrlForOrigin]);
+  const credentialsOriginMismatch =
+    Object.keys(activeServer?.credentials ?? {}).length > 0 &&
+    activeServer?.credentialsOrigin != null &&
+    requestOrigin !== activeServer.credentialsOrigin;
+  // If the origin we'd send to no longer matches where credentials were captured,
+  // refuse to attach them — prevents a hostile spec update from siphoning saved tokens.
+  const authCredentials = credentialsOriginMismatch ? {} : activeServer?.credentials ?? {};
   const cookieHeader = useMemo(() => formatCookieHeader(activeServerCookies), [activeServerCookies]);
   const abortControllerRef = useRef<AbortController | undefined>(undefined);
   const parameterFields = useMemo(() => operation.parameters.filter((parameter): parameter is ParameterObject => !isReferenceObject(parameter)), [operation.parameters]);
@@ -1884,7 +1895,6 @@ function TryItOut({
   );
   const requestBodySchema = getRequestBodyMediaTypes(operation)[state.contentType]?.schema;
   const validationMessages = useMemo(() => validateTryItOutState(operation, state), [operation, state]);
-  const requestOrigin = useMemo(() => getRequestOrigin(request.url), [request.url]);
 
   const updateParameter = (name: string, value: string) => {
     setState((current) => ({ ...current, parameters: { ...current.parameters, [name]: value } }));
@@ -2022,6 +2032,15 @@ function TryItOut({
               </label>
             ) : null}
           </fieldset>
+
+          {credentialsOriginMismatch ? (
+            <div className="bov-warning" role="alert">
+              <strong>Saved credentials not sent.</strong> They were captured for{' '}
+              <code>{activeServer?.credentialsOrigin}</code> but this request would go to{' '}
+              <code>{requestOrigin ?? 'an invalid URL'}</code>. Re-enter credentials in Settings to
+              authorize this origin.
+            </div>
+          ) : null}
 
           <ActiveCookiesPanel
             cookies={activeServerCookies}
@@ -2728,11 +2747,37 @@ function ExternalDocsLink({ docs }: { docs: ExternalDocumentationObject }) {
 }
 
 function ExternalLink({ href, children }: { href: string; children: ReactNode }) {
+  const safeHref = sanitizeExternalHref(href);
+  if (!safeHref) {
+    return <span>{children}</span>;
+  }
   return (
-    <a href={href} rel="noreferrer" target="_blank">
+    <a href={safeHref} rel="noreferrer" target="_blank">
       {children}
     </a>
   );
+}
+
+function sanitizeExternalHref(href: unknown): string | null {
+  if (typeof href !== 'string') return null;
+  const trimmed = href.trim();
+  if (!trimmed) return null;
+  // Allow scheme-relative, root-relative, or fragment URLs.
+  if (trimmed.startsWith('//') || trimmed.startsWith('/') || trimmed.startsWith('#') || trimmed.startsWith('?')) {
+    return trimmed;
+  }
+  // Block any string with a scheme that isn't http(s) or mailto.
+  // Reject control chars (incl. tab/newline) that browsers strip when parsing schemes.
+  // eslint-disable-next-line no-control-regex
+  const cleaned = trimmed.replace(/[ -]/g, '');
+  if (/^(https?|mailto):/i.test(cleaned)) {
+    return trimmed;
+  }
+  // No scheme detected: treat as a relative path.
+  if (!/^[a-z][a-z0-9+.-]*:/i.test(cleaned)) {
+    return trimmed;
+  }
+  return null;
 }
 
 function MethodLabel({ method }: { method: NormalizedOperation['method'] }) {
@@ -3550,6 +3595,18 @@ function ServerForm({
   const schemeEntries = Object.entries(schemes);
 
   const updateField = <K extends keyof SavedServer>(field: K, value: SavedServer[K]) => {
+    if (field === 'url' && typeof value === 'string') {
+      const nextOrigin = getRequestOrigin(value);
+      const hasCredentials = Object.keys(server.credentials ?? {}).length > 0;
+      const originChanged =
+        hasCredentials &&
+        server.credentialsOrigin != null &&
+        nextOrigin !== server.credentialsOrigin;
+      if (originChanged) {
+        onChange({ ...server, url: value, credentials: {}, credentialsOrigin: null });
+        return;
+      }
+    }
     onChange({ ...server, [field]: value });
   };
 
@@ -3560,7 +3617,9 @@ function ServerForm({
     } else {
       next[schemeName] = credential;
     }
-    onChange({ ...server, credentials: next });
+    const hasAny = Object.keys(next).length > 0;
+    const credentialsOrigin = hasAny ? getRequestOrigin(server.url) : null;
+    onChange({ ...server, credentials: next, credentialsOrigin });
   };
 
   return (
@@ -3889,6 +3948,10 @@ type SavedServer = {
   url: string;
   variables: Record<string, string>;
   credentials: TryItOutAuthCredentials;
+  // Origin (scheme+host+port) at which the current credentials were saved.
+  // Used to refuse re-using credentials if the server URL is later changed
+  // to a different origin (e.g. via a hostile spec update).
+  credentialsOrigin?: string | null;
   source: 'spec' | 'user';
 };
 
@@ -3962,21 +4025,55 @@ function buildInitialServersState(
   const specServers: ServerObject[] = (document.servers && document.servers.length
     ? document.servers
     : [{ url: '', description: 'Default' }]) as ServerObject[];
-  const servers: SavedServer[] = specServers.map((spec, index) => ({
-    id: `spec-${index}`,
-    label: spec.description ?? (spec.url || `Server ${index + 1}`),
-    url: spec.url,
-    variables: createInitialServerVariables(spec),
-    credentials: index === 0 ? { ...preauthorized } : {},
-    source: 'spec',
-  }));
+  const servers: SavedServer[] = specServers.map((spec, index) => {
+    const hasPreauth = index === 0 && Object.keys(preauthorized).length > 0;
+    return {
+      id: `spec-${index}`,
+      label: spec.description ?? (spec.url || `Server ${index + 1}`),
+      url: spec.url,
+      variables: createInitialServerVariables(spec),
+      credentials: hasPreauth ? { ...preauthorized } : {},
+      credentialsOrigin: hasPreauth ? getRequestOrigin(spec.url) : null,
+      source: 'spec',
+    };
+  });
   return { servers, activeId: servers[0]?.id ?? null };
 }
 
+// Drop persisted credentials whose origin no longer matches the server's current URL —
+// defends against hostile spec updates redirecting a server to an attacker-controlled host
+// while the saved credentials remain.
+function reconcileCredentialOrigins(state: SavedServersState): SavedServersState {
+  let changed = false;
+  const servers = state.servers.map((server) => {
+    const hasCredentials = Object.keys(server.credentials ?? {}).length > 0;
+    if (!hasCredentials) {
+      return server;
+    }
+    const currentOrigin = getRequestOrigin(server.url);
+    if (currentOrigin && server.credentialsOrigin && currentOrigin === server.credentialsOrigin) {
+      return server;
+    }
+    changed = true;
+    return { ...server, credentials: {}, credentialsOrigin: null };
+  });
+  return changed ? { ...state, servers } : state;
+}
+
 function useSavedServers(specId: string, document: OpenAPIObject, preauthorized: TryItOutAuthCredentials) {
-  const [state, setState] = useState<SavedServersState>(
-    () => readPersistedServers(specId) ?? buildInitialServersState(document, preauthorized),
-  );
+  const [state, setState] = useState<SavedServersState>(() => {
+    const persisted = readPersistedServers(specId);
+    if (!persisted) {
+      return buildInitialServersState(document, preauthorized);
+    }
+    const reconciled = reconcileCredentialOrigins(persisted);
+    // If reconcile dropped any credentials, also wipe them at rest so they can't
+    // be read by other code paths (export, future renders, devtools).
+    if (reconciled !== persisted) {
+      writePersistedServers(specId, reconciled);
+    }
+    return reconciled;
+  });
 
   const apply = useCallback(
     (updater: (prev: SavedServersState) => SavedServersState) => {
