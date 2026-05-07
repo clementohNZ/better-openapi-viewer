@@ -45,6 +45,6 @@ jobs:
         env:
           DIST_TAG: ${{ github.event.inputs.tag || 'latest' }}
         run: |
-          npm publish --workspace @better-openapi-viewer/core --access public --provenance --tag "$DIST_TAG"
-          npm publish --workspace @better-openapi-viewer/ui --access public --provenance --tag "$DIST_TAG"
-          npm publish --workspace @better-openapi-viewer/nestjs --access public --provenance --tag "$DIST_TAG"
+          npm publish --workspace @clem/better-openapi-viewer-core --access public --provenance --tag "$DIST_TAG"
+          npm publish --workspace @clem/better-openapi-viewer-ui --access public --provenance --tag "$DIST_TAG"
+          npm publish --workspace @clem/better-openapi-viewer-nestjs --access public --provenance --tag "$DIST_TAG"
