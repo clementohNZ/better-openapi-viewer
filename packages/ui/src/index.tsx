@@ -1,4 +1,9 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { EditorState } from '@codemirror/state';
+import { EditorView, keymap } from '@codemirror/view';
+import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
+import { json as jsonLanguage } from '@codemirror/lang-json';
+import { linter, lintGutter } from '@codemirror/lint';
 import {
   buildTryItOutRequest,
   filterOperations,
@@ -54,12 +59,14 @@ export function BetterOpenApiViewer({ document, config, persistAuthorization, pr
   const [authFilter, setAuthFilter] = useState<NonNullable<OperationFilter['auth']>>('any');
   const [deprecatedFilter, setDeprecatedFilter] = useState('any');
   const [selectedContentTypes, setSelectedContentTypes] = useState<string[]>([]);
-  const [tryItOutEnabled, setTryItOutEnabled] = useState(true);
-  const [theme, setTheme] = useState<'light' | 'dark'>('light');
+  const tryItOutEnabled = true;
+  const [preferences, updatePreferences] = usePreferences();
+  const theme = preferences.theme;
+  const setTheme = (next: 'light' | 'dark') => updatePreferences({ theme: next });
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const showOnboarding = !preferences.onboardingCompleted;
   const operations = useMemo(() => sortOperations(getOperations(document), viewerConfig.operationsSorter), [document, viewerConfig.operationsSorter]);
-  const [expandedOperations, setExpandedOperations] = useState<Set<string>>(() =>
-    viewerConfig.defaultExpansion === 'full' ? new Set(operations.map((operation) => operation.id)) : new Set(),
-  );
+  const [selectedOperationId, setSelectedOperationId] = useState<string | null>(() => operations[0]?.id ?? null);
   const securitySchemes = useMemo(() => getSupportedSecuritySchemes(document), [document]);
   const componentSchemas = useMemo(() => getComponentSchemas(document), [document]);
   const [authCredentials, setAuthCredentials] = useState<TryItOutAuthCredentials>(() =>
@@ -111,22 +118,22 @@ export function BetterOpenApiViewer({ document, config, persistAuthorization, pr
     [document.tags, filteredOperations, viewerConfig.tagsSorter],
   );
 
-  const toggleOperation = (operationId: string) => {
-    setExpandedOperations((current) => {
-      const next = new Set(current);
+  const selectedOperation = useMemo(
+    () => (selectedOperationId ? operations.find((op) => op.id === selectedOperationId) ?? null : null),
+    [operations, selectedOperationId],
+  );
+  const closeDrawer = useCallback(() => setSelectedOperationId(null), []);
 
-      if (next.has(operationId)) {
-        next.delete(operationId);
-      } else {
-        next.add(operationId);
-      }
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const hash = window.location.hash;
+    if (hash.startsWith('#operation-')) {
+      const id = hash.slice('#operation-'.length);
+      const match = operations.find((op) => toDomId(op.id) === id);
+      if (match) setSelectedOperationId(match.id);
+    }
+  }, [operations]);
 
-      return next;
-    });
-  };
-
-  const expandAll = () => setExpandedOperations(new Set(filteredOperations.map((operation) => operation.id)));
-  const collapseAll = () => setExpandedOperations(new Set());
   const resetFilters = () => {
     setQuery('');
     setSelectedMethods([]);
@@ -144,228 +151,340 @@ export function BetterOpenApiViewer({ document, config, persistAuthorization, pr
   };
 
   return (
-    <main data-theme={theme}>
-      <header>
-        {document.info?.version ? <p>{document.info.version}</p> : null}
-        <h1>{document.info?.title ?? 'OpenAPI'}</h1>
-        {document.info?.description ? <MarkdownText value={document.info.description} /> : null}
-        <fieldset aria-label="Viewer theme">
-          <legend>Theme</legend>
-          <label>
-            <input type="radio" name="viewer-theme" checked={theme === 'light'} onChange={() => setTheme('light')} />
-            Light theme
-          </label>
-          <label>
-            <input type="radio" name="viewer-theme" checked={theme === 'dark'} onChange={() => setTheme('dark')} />
-            Dark theme
-          </label>
-        </fieldset>
-      </header>
+    <main className="bov" data-theme={theme}>
+      <div className="bov-shell">
+        <aside className="bov-sidebar" aria-label="API navigation and filters">
+          <header className="bov-product">
+            <button
+              type="button"
+              className="bov-product-gear"
+              aria-label="Open settings"
+              title="Settings"
+              onClick={() => setSettingsOpen(true)}
+            >
+              <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="8" cy="8" r="2.2" />
+                <path d="M8 1.5v1.8M8 12.7v1.8M3.4 3.4l1.3 1.3M11.3 11.3l1.3 1.3M1.5 8h1.8M12.7 8h1.8M3.4 12.6l1.3-1.3M11.3 4.7l1.3-1.3" />
+              </svg>
+            </button>
+            <p className="bov-kicker">API Reference</p>
+            <h1>{document.info?.title ?? 'OpenAPI'}</h1>
+            <p className="bov-version">v{document.info?.version ?? '—'}</p>
+            {document.info?.description ? <div className="bov-description"><MarkdownText value={document.info.description} /></div> : null}
+            <dl className="bov-stats" aria-label="Document summary">
+              <Metric label="Ops" value={operations.length} />
+              <Metric label="Tags" value={tagOptions.length} />
+              <Metric label="Models" value={Object.keys(componentSchemas).length} />
+            </dl>
+          </header>
 
-      <AuthorizePanel
-        credentials={authCredentials}
-        onChange={updateAuthCredentials}
-        persistAuthorization={viewerConfig.persistAuthorization}
-        schemes={securitySchemes}
-      />
-
-      <Models schemas={componentSchemas} />
-
-      <section aria-labelledby="endpoint-navigation-heading">
-        <h2 id="endpoint-navigation-heading">Endpoints</h2>
-        <p>
-          Showing {filteredOperations.length} of {operations.length} operations.
-        </p>
-        {viewerConfig.filter === false ? null : (
-          <>
-            <label>
-              Search endpoints
-              <input
-                type="search"
-                value={query}
-                onChange={(event) => setQuery(event.currentTarget.value)}
-                placeholder={typeof viewerConfig.filter === 'string' ? viewerConfig.filter : 'Method, path, tag, summary, parameter...'}
-              />
-            </label>
-            <FilterFieldset legend="Methods">
-              {methodOptions.map(({ value, count }) => (
-                <CheckboxFilter
-                  key={value}
-                  label={value.toUpperCase()}
-                  count={count}
-                  checked={selectedMethods.includes(value as HttpMethod)}
-                  onChange={() => setSelectedMethods((current) => toggleArrayValue(current, value as HttpMethod))}
+          {viewerConfig.filter === false ? null : (
+            <section className="bov-panel" aria-labelledby="endpoint-navigation-heading">
+              <div className="bov-section-heading">
+                <h2 id="endpoint-navigation-heading">Filters</h2>
+                <span>{filteredOperations.length}/{operations.length}</span>
+              </div>
+              <label className="bov-search bov-search-sidebar">
+                <span className="sr-only">Search endpoints</span>
+                <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14"><circle cx="7" cy="7" r="5" fill="none" stroke="currentColor" strokeWidth="1.5"/><path d="M11 11l3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+                <input
+                  type="search"
+                  value={query}
+                  onChange={(event) => setQuery(event.currentTarget.value)}
+                  placeholder={typeof viewerConfig.filter === 'string' ? viewerConfig.filter : 'Search method, path, tag…'}
                 />
-              ))}
-            </FilterFieldset>
-            <FilterFieldset legend="Tags">
-              {tagOptions.map(({ value, count }) => (
-                <CheckboxFilter
-                  key={value}
-                  label={value}
-                  count={count}
-                  checked={selectedTags.includes(value)}
-                  onChange={() => setSelectedTags((current) => toggleArrayValue(current, value))}
-                />
-              ))}
-            </FilterFieldset>
-            <FilterFieldset legend="Auth">
-              <RadioFilter label="Any auth state" count={operations.length} checked={authFilter === 'any'} onChange={() => setAuthFilter('any')} />
-              <RadioFilter
-                label="Requires auth"
-                count={authCounts.required}
-                checked={authFilter === 'required'}
-                onChange={() => setAuthFilter('required')}
-              />
-              <RadioFilter label="No auth" count={authCounts.none} checked={authFilter === 'none'} onChange={() => setAuthFilter('none')} />
-            </FilterFieldset>
-            <FilterFieldset legend="Status">
-              <RadioFilter
-                label="Any status"
-                count={operations.length}
-                checked={deprecatedFilter === 'any'}
-                onChange={() => setDeprecatedFilter('any')}
-                name="deprecated-filter"
-              />
-              <RadioFilter
-                label="Active"
-                count={deprecatedCounts.active}
-                checked={deprecatedFilter === 'active'}
-                onChange={() => setDeprecatedFilter('active')}
-                name="deprecated-filter"
-              />
-              <RadioFilter
-                label="Deprecated"
-                count={deprecatedCounts.deprecated}
-                checked={deprecatedFilter === 'deprecated'}
-                onChange={() => setDeprecatedFilter('deprecated')}
-                name="deprecated-filter"
-              />
-            </FilterFieldset>
-            {contentTypeOptions.length ? (
-              <FilterFieldset legend="Content types">
-                {contentTypeOptions.map(({ value, count }) => (
+              </label>
+              <FilterFieldset legend="Methods">
+                {methodOptions.map(({ value, count }) => (
+                  <CheckboxFilter
+                    key={value}
+                    label={value.toUpperCase()}
+                    count={count}
+                    checked={selectedMethods.includes(value as HttpMethod)}
+                    onChange={() => setSelectedMethods((current) => toggleArrayValue(current, value as HttpMethod))}
+                  />
+                ))}
+              </FilterFieldset>
+              <FilterFieldset legend="Tags">
+                {tagOptions.map(({ value, count }) => (
                   <CheckboxFilter
                     key={value}
                     label={value}
                     count={count}
-                    checked={selectedContentTypes.includes(value)}
-                    onChange={() => setSelectedContentTypes((current) => toggleArrayValue(current, value))}
+                    checked={selectedTags.includes(value)}
+                    onChange={() => setSelectedTags((current) => toggleArrayValue(current, value))}
                   />
                 ))}
               </FilterFieldset>
-            ) : null}
-            {activeFilterCount ? (
-              <button type="button" onClick={resetFilters}>
-                Reset filters ({activeFilterCount})
-              </button>
-            ) : null}
-          </>
-        )}
-
-        <nav aria-label="Endpoint navigation">
-          {groupedOperations.length ? (
-            groupedOperations.map(({ name, operations: tagOperations }) => (
-              <section key={name} aria-labelledby={`tag-nav-${toDomId(name)}`}>
-                <h3 id={`tag-nav-${toDomId(name)}`}>
-                  {name} ({tagOperations.length})
-                </h3>
-                <ul>
-                  {tagOperations.map((operation) => (
-                    <li key={`${name}:${operation.id}`}>
-                      <a href={`#operation-${toDomId(operation.id)}`}>
-                        <MethodLabel method={operation.method} /> {operation.path}
-                      </a>
-                    </li>
+              <FilterFieldset legend="Auth">
+                <RadioFilter label="Any auth state" count={operations.length} checked={authFilter === 'any'} onChange={() => setAuthFilter('any')} />
+                <RadioFilter
+                  label="Requires auth"
+                  count={authCounts.required}
+                  checked={authFilter === 'required'}
+                  onChange={() => setAuthFilter('required')}
+                />
+                <RadioFilter label="No auth" count={authCounts.none} checked={authFilter === 'none'} onChange={() => setAuthFilter('none')} />
+              </FilterFieldset>
+              <FilterFieldset legend="Status">
+                <RadioFilter
+                  label="Any status"
+                  count={operations.length}
+                  checked={deprecatedFilter === 'any'}
+                  onChange={() => setDeprecatedFilter('any')}
+                  name="deprecated-filter"
+                />
+                <RadioFilter
+                  label="Active"
+                  count={deprecatedCounts.active}
+                  checked={deprecatedFilter === 'active'}
+                  onChange={() => setDeprecatedFilter('active')}
+                  name="deprecated-filter"
+                />
+                <RadioFilter
+                  label="Deprecated"
+                  count={deprecatedCounts.deprecated}
+                  checked={deprecatedFilter === 'deprecated'}
+                  onChange={() => setDeprecatedFilter('deprecated')}
+                  name="deprecated-filter"
+                />
+              </FilterFieldset>
+              {contentTypeOptions.length ? (
+                <FilterFieldset legend="Content types">
+                  {contentTypeOptions.map(({ value, count }) => (
+                    <CheckboxFilter
+                      key={value}
+                      label={value}
+                      count={count}
+                      checked={selectedContentTypes.includes(value)}
+                      onChange={() => setSelectedContentTypes((current) => toggleArrayValue(current, value))}
+                    />
                   ))}
-                </ul>
-              </section>
-            ))
-          ) : (
-            <p>No endpoints match your search.</p>
+                </FilterFieldset>
+              ) : null}
+              {activeFilterCount ? (
+                <button className="bov-button bov-button-quiet" type="button" onClick={resetFilters}>
+                  Reset filters ({activeFilterCount})
+                </button>
+              ) : null}
+            </section>
           )}
-        </nav>
-      </section>
 
-      <section aria-labelledby="operations-heading">
-        <h2 id="operations-heading">Operations</h2>
-        <div>
-          <button type="button" onClick={expandAll}>
-            Expand all
-          </button>
-          <button type="button" onClick={collapseAll}>
-            Collapse all
-          </button>
-          <label>
-            <input type="checkbox" checked={tryItOutEnabled} onChange={(event) => setTryItOutEnabled(event.currentTarget.checked)} />
-            Enable Try It Out
-          </label>
-        </div>
-        {groupedOperations.map(({ name, description, externalDocs, operations: tagOperations }) => (
-          <section key={name} aria-labelledby={`tag-${toDomId(name)}`}>
-            <h3 id={`tag-${toDomId(name)}`}>
-              {name} ({tagOperations.length})
-            </h3>
-            {description ? <MarkdownText value={description} /> : null}
-            {externalDocs ? <ExternalDocsLink docs={externalDocs} /> : null}
+          <AuthorizePanel
+            credentials={authCredentials}
+            onChange={updateAuthCredentials}
+            persistAuthorization={viewerConfig.persistAuthorization}
+            schemes={securitySchemes}
+          />
 
-            <ul>
-              {tagOperations.map((operation) => {
-                const isExpanded = expandedOperations.has(operation.id);
+          <Models schemas={componentSchemas} />
 
-                return (
-                  <li key={`${name}:${operation.id}`} id={`operation-${toDomId(operation.id)}`}>
-                    <article>
-                      <header>
-                        <button
-                          type="button"
-                          aria-expanded={isExpanded}
-                          aria-controls={`operation-details-${toDomId(operation.id)}`}
-                          onClick={() => toggleOperation(operation.id)}
-                        >
-                          <MethodLabel method={operation.method} /> <code>{operation.path}</code>
-                          {operation.summary ? <span> {operation.summary}</span> : null}
-                          {operation.deprecated ? <strong> Deprecated</strong> : null}
-                        </button>
-                      </header>
+        </aside>
 
-                      {isExpanded ? (
-                        <div id={`operation-details-${toDomId(operation.id)}`}>
-                          <OperationOverview document={document} operation={operation} />
-                          <Parameters parameters={operation.parameters} />
-                          <RequestBody requestBody={operation.requestBody} />
-                          <Responses operation={operation} document={document} />
-                          <Callbacks operation={operation} document={document} />
-                          <Security security={operation.security} schemes={securitySchemes} />
-                          <Servers servers={operation.servers} />
-                          {isSubmitMethodSupported(operation.method, viewerConfig) ? (
-                            <TryItOut
-                              authCredentials={authCredentials}
-                              displayRequestDuration={viewerConfig.displayRequestDuration}
-                              globallyEnabled={tryItOutEnabled}
-                              operation={operation}
-                              document={document}
-                            />
-                          ) : null}
-                        </div>
-                      ) : null}
-                    </article>
-                  </li>
-                );
-              })}
-            </ul>
-          </section>
-        ))}
-      </section>
+        <section className="bov-content" aria-labelledby="operations-heading">
+          <header className="bov-content-header">
+            <div className="bov-content-header-text">
+              <p className="bov-kicker">Workspace</p>
+              <h2 id="operations-heading">Operations</h2>
+            </div>
+            <p className="bov-muted bov-content-count">
+              {filteredOperations.length} of {operations.length} {operations.length === 1 ? 'endpoint' : 'endpoints'}
+            </p>
+          </header>
+
+          {groupedOperations.length ? (
+            <div className="bov-operation-groups">
+              {groupedOperations.map(({ name, description, externalDocs, operations: tagOperations }) => (
+                <section className="bov-tag-group" key={name} aria-labelledby={`tag-${toDomId(name)}`}>
+                  <div className="bov-tag-header">
+                    <div className="bov-tag-title">
+                      <h3 id={`tag-${toDomId(name)}`}>{name}</h3>
+                      <span className="bov-tag-count">{tagOperations.length}</span>
+                    </div>
+                    {description ? <div className="bov-muted bov-tag-desc"><MarkdownText value={description} /></div> : null}
+                    {externalDocs ? <ExternalDocsLink docs={externalDocs} /> : null}
+                  </div>
+
+                  <ul className="bov-operation-list" role="list">
+                    {tagOperations.map((operation, index) => {
+                      const isActive = selectedOperationId === operation.id;
+                      return (
+                        <li className="bov-operation-row" key={`${name}:${operation.id}`} id={`operation-${toDomId(operation.id)}`} style={{ '--index': index } as CssVars}>
+                          <button
+                            className="bov-row-trigger"
+                            type="button"
+                            data-active={isActive ? 'true' : 'false'}
+                            aria-pressed={isActive}
+                            onClick={() => setSelectedOperationId(operation.id)}
+                          >
+                            <MethodLabel method={operation.method} />
+                            <code className="bov-row-path">{operation.path}</code>
+                            <span className="bov-row-summary">
+                              {operation.summary ?? <span className="bov-faint-text">—</span>}
+                            </span>
+                            {operation.deprecated ? <span className="bov-pill bov-pill-warn">deprecated</span> : null}
+                            {operation.requiresAuth ? <span className="bov-pill" title="Requires auth" aria-label="Requires auth">●</span> : null}
+                            <span className="bov-row-arrow" aria-hidden="true">→</span>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </section>
+              ))}
+            </div>
+          ) : (
+            <EmptyState title="Nothing matches these filters" body="Clear a filter or search for a method, route, tag, operation id, parameter, or schema name." />
+          )}
+        </section>
+        <OperationDetailPanel
+          operation={selectedOperation}
+          document={document}
+          authCredentials={authCredentials}
+          tryItOutEnabled={tryItOutEnabled}
+          viewerConfig={viewerConfig}
+          securitySchemes={securitySchemes}
+          onClose={closeDrawer}
+        />
+      </div>
+      {showOnboarding ? (
+        <OnboardingModal
+          preferences={preferences}
+          onComplete={(patch) => updatePreferences({ ...patch, onboardingCompleted: true })}
+        />
+      ) : null}
+      {settingsOpen ? (
+        <SettingsModal
+          preferences={preferences}
+          onChange={updatePreferences}
+          onClose={() => setSettingsOpen(false)}
+        />
+      ) : null}
     </main>
+  );
+}
+
+function OperationDetailPanel({
+  operation,
+  document,
+  authCredentials,
+  tryItOutEnabled,
+  viewerConfig,
+  securitySchemes,
+  onClose,
+}: {
+  operation: NormalizedOperation | null;
+  document: OpenAPIObject;
+  authCredentials: TryItOutAuthCredentials;
+  tryItOutEnabled: boolean;
+  viewerConfig: ViewerConfig;
+  securitySchemes: Record<string, SecuritySchemeObject>;
+  onClose: () => void;
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [tab, setTab] = useState<'docs' | 'try'>('docs');
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: 0 });
+    setTab('docs');
+  }, [operation?.id]);
+
+  if (!operation) {
+    return (
+      <aside className="bov-detail" aria-label="Endpoint details">
+        <div className="bov-detail-empty">
+          <div className="bov-detail-empty-mark" aria-hidden="true">{'{ }'}</div>
+          <h3>No endpoint selected</h3>
+          <p>Pick an endpoint from the list to view its parameters, request, response and try it out.</p>
+        </div>
+      </aside>
+    );
+  }
+
+  const canTry = isSubmitMethodSupported(operation.method, viewerConfig);
+
+  return (
+    <aside className="bov-detail" aria-label={`${operation.method.toUpperCase()} ${operation.path}`}>
+      <header className="bov-detail-header">
+        <div className="bov-detail-title">
+          <div className="bov-detail-line">
+            <MethodLabel method={operation.method} />
+            <code className="bov-detail-path">{operation.path}</code>
+          </div>
+          <p className="bov-detail-summary">
+            {operation.summary ?? <span className="bov-faint-text">No summary documented</span>}
+            {operation.deprecated ? <span className="bov-pill bov-pill-warn">deprecated</span> : null}
+          </p>
+        </div>
+        <button className="bov-detail-close" type="button" onClick={onClose} aria-label="Clear selection" title="Clear selection">
+          <span aria-hidden="true">×</span>
+        </button>
+      </header>
+
+      {canTry ? (
+        <div className="bov-detail-tabs" role="tablist">
+          <button role="tab" aria-selected={tab === 'docs'} className="bov-tab" data-active={tab === 'docs'} onClick={() => setTab('docs')}>
+            Reference
+          </button>
+          <button role="tab" aria-selected={tab === 'try'} className="bov-tab" data-active={tab === 'try'} onClick={() => setTab('try')}>
+            Try it out
+          </button>
+        </div>
+      ) : null}
+
+      <div className="bov-detail-body" ref={scrollRef}>
+        {tab === 'docs' || !canTry ? (
+          <div className="bov-detail-stack">
+            <OperationOverview document={document} operation={operation} />
+            <Parameters parameters={operation.parameters} />
+            <RequestBody requestBody={operation.requestBody} />
+            <Responses operation={operation} document={document} />
+            <Callbacks operation={operation} document={document} />
+            <Security security={operation.security} schemes={securitySchemes} />
+            <Servers servers={operation.servers} />
+          </div>
+        ) : (
+          <div className="bov-detail-stack">
+            <TryItOut
+              authCredentials={authCredentials}
+              displayRequestDuration={Boolean(viewerConfig.displayRequestDuration)}
+              globallyEnabled={tryItOutEnabled}
+              operation={operation}
+              document={document}
+            />
+          </div>
+        )}
+      </div>
+    </aside>
   );
 }
 
 export type { OpenAPIObject };
 
+type CssVars = CSSProperties & Record<`--${string}`, string | number>;
+
+function Metric({ label, value }: { label: string; value: number }) {
+  return (
+    <div>
+      <dt>{label}</dt>
+      <dd>{value}</dd>
+    </div>
+  );
+}
+
+function EmptyState({ body, title }: { body: string; title: string }) {
+  return (
+    <div className="bov-empty">
+      <span aria-hidden="true" />
+      <h3>{title}</h3>
+      <p>{body}</p>
+    </div>
+  );
+}
+
 function FilterFieldset({ legend, children }: { legend: string; children: ReactNode }) {
   return (
-    <fieldset>
+    <fieldset className="bov-filter-group">
       <legend>{legend}</legend>
       {children}
     </fieldset>
@@ -374,9 +493,10 @@ function FilterFieldset({ legend, children }: { legend: string; children: ReactN
 
 function CheckboxFilter({ label, count, checked, onChange }: { label: string; count: number; checked: boolean; onChange: () => void }) {
   return (
-    <label>
+    <label className="bov-filter-option">
       <input type="checkbox" checked={checked} onChange={onChange} />
-      {label} ({count})
+      <span>{label}</span>
+      <small>{count}</small>
     </label>
   );
 }
@@ -395,9 +515,10 @@ function RadioFilter({
   name?: string;
 }) {
   return (
-    <label>
+    <label className="bov-filter-option">
       <input type="radio" name={name} checked={checked} onChange={onChange} />
-      {label} ({count})
+      <span>{label}</span>
+      <small>{count}</small>
     </label>
   );
 }
@@ -406,8 +527,11 @@ function Models({ schemas }: { schemas: Record<string, unknown> }) {
   const entries = Object.entries(schemas);
 
   return (
-    <section aria-labelledby="models-heading">
-      <h2 id="models-heading">Models</h2>
+    <section className="bov-panel bov-models" aria-labelledby="models-heading">
+      <div className="bov-section-heading">
+        <h2 id="models-heading">Models</h2>
+        <span>{entries.length}</span>
+      </div>
       {entries.length ? (
         <ul>
           {entries.map(([name, schema]) => (
@@ -420,7 +544,7 @@ function Models({ schemas }: { schemas: Record<string, unknown> }) {
           ))}
         </ul>
       ) : (
-        <p>No component schemas documented.</p>
+        <p className="bov-muted">No component schemas documented.</p>
       )}
     </section>
   );
@@ -851,14 +975,19 @@ function AuthorizePanel({
   const clearAll = () => onChange({});
 
   return (
-    <section aria-labelledby="authorize-heading">
-      <h2 id="authorize-heading">Authorize</h2>
+    <section className="bov-panel bov-authorize" aria-labelledby="authorize-heading">
+      <div className="bov-section-heading">
+        <h2 id="authorize-heading">Authorize</h2>
+        <span>
+          {credentialCount}/{schemeEntries.length}
+        </span>
+      </div>
       {schemeEntries.length ? (
         <details>
           <summary>
             Credentials configured for {credentialCount} of {schemeEntries.length} security schemes
           </summary>
-          {persistAuthorization ? <p>Credentials are stored in localStorage for this API document.</p> : null}
+          {persistAuthorization ? <p className="bov-muted">Credentials are stored in localStorage for this API document.</p> : null}
           <div role="group" aria-labelledby="authorize-heading">
             {schemeEntries.map(([schemeName, scheme]) => (
               <SecuritySchemeCredentialField
@@ -870,12 +999,12 @@ function AuthorizePanel({
               />
             ))}
           </div>
-          <button type="button" onClick={clearAll} disabled={!credentialCount}>
+          <button className="bov-button bov-button-quiet" type="button" onClick={clearAll} disabled={!credentialCount}>
             Clear all credentials
           </button>
         </details>
       ) : (
-        <p>No supported security schemes found.</p>
+        <p className="bov-muted">No supported security schemes found.</p>
       )}
     </section>
   );
@@ -925,7 +1054,7 @@ function SecuritySchemeCredentialField({
             onChange={(event) => onChange({ ...basicCredential, password: event.currentTarget.value })}
           />
         </label>
-        <button type="button" onClick={() => onChange(undefined)} disabled={!credential}>
+        <button className="bov-button bov-button-quiet" type="button" onClick={() => onChange(undefined)} disabled={!credential}>
           Clear {name}
         </button>
       </fieldset>
@@ -957,7 +1086,7 @@ function SecuritySchemeCredentialField({
           ))}
         </dl>
       ) : null}
-      <button type="button" onClick={() => onChange(undefined)} disabled={!credential}>
+      <button className="bov-button bov-button-quiet" type="button" onClick={() => onChange(undefined)} disabled={!credential}>
         Clear {name}
       </button>
     </div>
@@ -1135,22 +1264,9 @@ function TryItOut({
   }, [globallyEnabled]);
 
   return (
-    <section aria-labelledby={`${toDomId(operation.id)}-try-it-out`}>
-      <h4 id={`${toDomId(operation.id)}-try-it-out`}>Try It Out</h4>
+    <section aria-labelledby={`${toDomId(operation.id)}-try-it-out`} className="bov-try">
       {globallyEnabled ? (
-        <label>
-          <input
-            type="checkbox"
-            checked={state.enabled}
-            onChange={(event) => setState((current) => ({ ...current, enabled: event.currentTarget.checked }))}
-          />
-          Enable request editing
-        </label>
-      ) : (
-        <p>Try It Out is disabled.</p>
-      )}
-      {globallyEnabled && state.enabled ? (
-        <div>
+        <div className="bov-try-stack">
           <fieldset>
             <legend>Request setup</legend>
             <label>
@@ -1266,14 +1382,11 @@ function TryItOut({
           ) : null}
 
           {state.contentType && !isMultipartContentType(state.contentType) ? (
-            <label>
-              Request body
-              <textarea
-                rows={8}
-                value={state.bodyText}
-                onChange={(event) => setState((current) => ({ ...current, bodyText: event.currentTarget.value }))}
-              />
-            </label>
+            <RequestBodyEditor
+              bodyText={state.bodyText}
+              isJson={state.bodyFormat === 'json'}
+              onChange={(bodyText) => setState((current) => ({ ...current, bodyText }))}
+            />
           ) : null}
 
           <GeneratedRequest
@@ -1283,7 +1396,7 @@ function TryItOut({
             onSnippetLanguageChange={(snippetLanguage) => setState((current) => ({ ...current, snippetLanguage }))}
           />
           {validationMessages.length || state.validationMessages.length ? (
-            <div role="alert">
+            <div className="bov-try-validation" role="alert">
               <h5>Validation</h5>
               <ul>
                 {(state.validationMessages.length ? state.validationMessages : validationMessages).map((message) => (
@@ -1292,14 +1405,14 @@ function TryItOut({
               </ul>
             </div>
           ) : null}
-          <div>
-            <button type="button" onClick={sendRequest} disabled={state.isSending}>
+          <div className="bov-try-actions">
+            <button className="bov-button bov-button-primary" type="button" onClick={sendRequest} disabled={state.isSending}>
               {state.isSending ? 'Sending...' : 'Send request'}
             </button>
-            <button type="button" onClick={cancelRequest} disabled={!state.isSending}>
+            <button className="bov-button" type="button" onClick={cancelRequest} disabled={!state.isSending}>
               Cancel request
             </button>
-            <button type="button" onClick={() => setState({ ...createTryItOutState(operation), enabled: true })}>
+            <button className="bov-button bov-button-quiet" type="button" onClick={() => setState({ ...createTryItOutState(operation), enabled: true })}>
               Reset inputs
             </button>
           </div>
@@ -1417,6 +1530,162 @@ function MultipartBodyFields({
   );
 }
 
+function RequestBodyEditor({
+  bodyText,
+  isJson,
+  onChange,
+}: {
+  bodyText: string;
+  isJson: boolean;
+  onChange: (bodyText: string) => void;
+}) {
+  const parseError = useMemo(() => {
+    if (!isJson || !bodyText.trim()) return null;
+    try {
+      JSON.parse(bodyText);
+      return null;
+    } catch (error) {
+      return error instanceof Error ? error.message : 'Invalid JSON.';
+    }
+  }, [bodyText, isJson]);
+
+  const formatJson = () => {
+    try {
+      const parsed = JSON.parse(bodyText);
+      onChange(JSON.stringify(parsed, null, 2));
+    } catch {
+      // ignore — error is already shown
+    }
+  };
+
+  return (
+    <fieldset className="bov-try-body">
+      <legend>Request body</legend>
+      <div className="bov-try-body-toolbar">
+        {isJson ? (
+          <button
+            type="button"
+            className="bov-button bov-button-quiet"
+            onClick={formatJson}
+            disabled={!bodyText.trim() || Boolean(parseError)}
+            title="Format JSON (2-space indent)"
+          >
+            Format
+          </button>
+        ) : null}
+      </div>
+      {isJson ? (
+        <JsonEditor value={bodyText} onChange={onChange} />
+      ) : (
+        <textarea
+          className="bov-try-body-textarea"
+          rows={8}
+          value={bodyText}
+          onChange={(event) => onChange(event.currentTarget.value)}
+        />
+      )}
+      {parseError ? <p className="bov-try-body-error">JSON parse error: {parseError}</p> : null}
+    </fieldset>
+  );
+}
+
+function JsonEditor({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const viewRef = useRef<EditorView | null>(null);
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const view = new EditorView({
+      parent: containerRef.current,
+      state: EditorState.create({
+        doc: value,
+        extensions: [
+          history(),
+          keymap.of([...defaultKeymap, ...historyKeymap]),
+          jsonLanguage(),
+          jsonLinter(),
+          lintGutter(),
+          EditorView.lineWrapping,
+          EditorView.theme({
+            '&': { fontSize: '12px', backgroundColor: 'transparent' },
+            '.cm-content': { fontFamily: "var(--bov-font-mono)", padding: '8px 0' },
+            '.cm-gutters': {
+              backgroundColor: 'transparent',
+              borderRight: '1px solid var(--bov-line)',
+              color: 'var(--bov-faint)',
+            },
+            '&.cm-focused': { outline: 'none' },
+            '.cm-activeLine': { backgroundColor: 'transparent' },
+            '.cm-activeLineGutter': { backgroundColor: 'transparent' },
+          }),
+          EditorView.updateListener.of((update) => {
+            if (update.docChanged) {
+              onChangeRef.current(update.state.doc.toString());
+            }
+          }),
+          EditorView.domEventHandlers({
+            blur: (_event, blurredView) => {
+              const text = blurredView.state.doc.toString();
+              if (!text.trim()) return false;
+              try {
+                const formatted = JSON.stringify(JSON.parse(text), null, 2);
+                if (formatted !== text) {
+                  onChangeRef.current(formatted);
+                }
+              } catch {
+                // leave invalid JSON as-is so the user can fix it
+              }
+              return false;
+            },
+          }),
+        ],
+      }),
+    });
+    viewRef.current = view;
+    return () => {
+      view.destroy();
+      viewRef.current = null;
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    const current = view.state.doc.toString();
+    if (current !== value) {
+      view.dispatch({ changes: { from: 0, to: current.length, insert: value } });
+    }
+  }, [value]);
+
+  return <div ref={containerRef} className="bov-json-editor" />;
+}
+
+function jsonLinter() {
+  return linter((view) => {
+    const text = view.state.doc.toString();
+    if (!text.trim()) return [];
+    try {
+      JSON.parse(text);
+      return [];
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Invalid JSON';
+      const match = /position\s+(\d+)/.exec(message);
+      const pos = match ? Math.min(Number(match[1]), text.length) : 0;
+      return [
+        {
+          from: pos,
+          to: Math.min(pos + 1, text.length),
+          severity: 'error' as const,
+          message,
+        },
+      ];
+    }
+  });
+}
+
 function GeneratedRequest({
   bodyLabel,
   onSnippetLanguageChange,
@@ -1429,6 +1698,7 @@ function GeneratedRequest({
   snippetLanguage: SnippetLanguage;
 }) {
   const snippet = generateRequestSnippet(request, snippetLanguage);
+  const headersText = JSON.stringify(request.headers, null, 2);
 
   return (
     <section>
@@ -1437,14 +1707,17 @@ function GeneratedRequest({
         <div>
           <dt>URL</dt>
           <dd>
-            <code>{request.url}</code>
-            <CopyButton label="Copy generated URL" value={request.url} />
+            <CopyableContent value={request.url} label="Copy generated URL" inline>
+              <code>{request.url}</code>
+            </CopyableContent>
           </dd>
         </div>
         <div>
           <dt>Headers</dt>
           <dd>
-            <UnknownValue value={request.headers} />
+            <CopyableContent value={headersText} label="Copy generated headers">
+              <UnknownValue value={request.headers} />
+            </CopyableContent>
           </dd>
         </div>
         <div>
@@ -1455,31 +1728,42 @@ function GeneratedRequest({
             ) : request.body === undefined ? (
               'No body.'
             ) : (
-              <>
+              <CopyableContent value={request.body} label="Copy generated request body">
                 <pre>{request.body}</pre>
-                <CopyButton label="Copy generated request body" value={request.body} />
-              </>
+              </CopyableContent>
             )}
           </dd>
         </div>
         <div>
           <dt>Snippet</dt>
           <dd>
-            <label>
-              Snippet language
-              <select value={snippetLanguage} onChange={(event) => onSnippetLanguageChange(event.currentTarget.value as SnippetLanguage)}>
-                <option value="curl">curl</option>
-                <option value="fetch">JavaScript fetch</option>
-                <option value="httpie">HTTPie</option>
-                <option value="python">Python</option>
-              </select>
-            </label>
-            <pre>{snippet}</pre>
-            <CopyButton label={`Copy generated ${snippetLanguage} snippet`} value={snippet} />
+            <div className="bov-generated-snippet">
+              <label>
+                Snippet language
+                <select value={snippetLanguage} onChange={(event) => onSnippetLanguageChange(event.currentTarget.value as SnippetLanguage)}>
+                  <option value="curl">curl</option>
+                  <option value="fetch">JavaScript fetch</option>
+                  <option value="httpie">HTTPie</option>
+                  <option value="python">Python</option>
+                </select>
+              </label>
+              <CopyableContent value={snippet} label={`Copy generated ${snippetLanguage} snippet`}>
+                <pre>{snippet}</pre>
+              </CopyableContent>
+            </div>
           </dd>
         </div>
       </dl>
     </section>
+  );
+}
+
+function CopyableContent({ children, inline, label, value }: { children: ReactNode; inline?: boolean; label: string; value: string }) {
+  return (
+    <div className={inline ? 'bov-copyable bov-copyable-inline' : 'bov-copyable'}>
+      {children}
+      <CopyButton label={label} value={value} />
+    </div>
   );
 }
 
@@ -1521,8 +1805,9 @@ function TryItOutResult({ displayRequestDuration, state }: { displayRequestDurat
         <div>
           <dt>Body</dt>
           <dd>
-            <pre>{state.response.body}</pre>
-            <CopyButton label="Copy response body" value={state.response.body} />
+            <CopyableContent value={state.response.body} label="Copy response body">
+              <JsonHighlight value={state.response.body} />
+            </CopyableContent>
           </dd>
         </div>
       </dl>
@@ -1544,7 +1829,7 @@ function CopyButton({ label, value }: { label: string; value: string }) {
   };
 
   return (
-    <button type="button" onClick={copyValue} aria-label={label}>
+    <button className="bov-copy-button" type="button" onClick={copyValue} aria-label={label}>
       {copied ? 'Copied' : 'Copy'}
     </button>
   );
@@ -1596,7 +1881,103 @@ function UnknownValue({ value }: { value: unknown }) {
     return <span>{String(value)}</span>;
   }
 
-  return <pre>{JSON.stringify(value, null, 2)}</pre>;
+  return <JsonHighlight value={value} />;
+}
+
+function JsonHighlight({ value }: { value: unknown }) {
+  let formatted: string | null = null;
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed.length > 0) {
+      try {
+        formatted = JSON.stringify(JSON.parse(trimmed), null, 2);
+      } catch {
+        formatted = null;
+      }
+    }
+  } else if (value !== undefined) {
+    try {
+      formatted = JSON.stringify(value, null, 2);
+    } catch {
+      formatted = null;
+    }
+  }
+
+  if (formatted === null) {
+    return <pre>{typeof value === 'string' ? value : String(value ?? '')}</pre>;
+  }
+
+  return <pre className="bov-json">{tokenizeJson(formatted)}</pre>;
+}
+
+const JSON_TOKEN_RE = /"(?:\\.|[^"\\])*"(\s*:)?|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|\btrue\b|\bfalse\b|\bnull\b|[{}[\],]/g;
+
+function tokenizeJson(text: string): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  let lastIndex = 0;
+  let key = 0;
+  let match: RegExpExecArray | null;
+
+  JSON_TOKEN_RE.lastIndex = 0;
+  while ((match = JSON_TOKEN_RE.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      nodes.push(text.slice(lastIndex, match.index));
+    }
+
+    const token = match[0];
+    if (token.startsWith('"') && match[1]) {
+      const stringPart = token.slice(0, token.length - match[1].length);
+      nodes.push(
+        <span key={key++} className="bov-json-key">
+          {stringPart}
+        </span>,
+      );
+      nodes.push(
+        <span key={key++} className="bov-json-punct">
+          {match[1]}
+        </span>,
+      );
+    } else if (token.startsWith('"')) {
+      nodes.push(
+        <span key={key++} className="bov-json-string">
+          {token}
+        </span>,
+      );
+    } else if (token === 'true' || token === 'false') {
+      nodes.push(
+        <span key={key++} className="bov-json-bool">
+          {token}
+        </span>,
+      );
+    } else if (token === 'null') {
+      nodes.push(
+        <span key={key++} className="bov-json-null">
+          {token}
+        </span>,
+      );
+    } else if (/^-?\d/.test(token)) {
+      nodes.push(
+        <span key={key++} className="bov-json-number">
+          {token}
+        </span>,
+      );
+    } else {
+      nodes.push(
+        <span key={key++} className="bov-json-punct">
+          {token}
+        </span>,
+      );
+    }
+
+    lastIndex = match.index + token.length;
+  }
+
+  if (lastIndex < text.length) {
+    nodes.push(text.slice(lastIndex));
+  }
+
+  return nodes;
 }
 
 function MarkdownText({ value }: { value: string }) {
@@ -1673,7 +2054,23 @@ function ExternalLink({ href, children }: { href: string; children: ReactNode })
 }
 
 function MethodLabel({ method }: { method: NormalizedOperation['method'] }) {
-  return <strong>{method.toUpperCase()}</strong>;
+  return <strong className={getMethodClassName(method)}>{method.toUpperCase()}</strong>;
+}
+
+function getMethodClassName(method: NormalizedOperation['method']) {
+  const base = 'bov-method';
+  const variants: Record<string, string> = {
+    get: 'bov-method-get',
+    post: 'bov-method-post',
+    put: 'bov-method-put',
+    patch: 'bov-method-patch',
+    delete: 'bov-method-delete',
+    options: 'bov-method-options',
+    head: 'bov-method-head',
+    trace: 'bov-method-trace',
+  };
+
+  return `${base} ${variants[method] ?? 'bov-method-default'}`;
 }
 
 function getCountedOptions(operations: NormalizedOperation[], getValues: (operation: NormalizedOperation) => string[]) {
@@ -1745,7 +2142,7 @@ function createTryItOutState(operation: NormalizedOperation): TryItOutState {
   const contentType = getRequestBodyContentTypes(operation)[0] ?? '';
 
   return {
-    enabled: false,
+    enabled: true,
     serverUrl: getServerOptions(operation)[0]?.url ?? '',
     serverVariables: createInitialServerVariables(getServerOptions(operation)[0]),
     contentType,
@@ -2063,6 +2460,230 @@ function isBasicCredential(credential: SecurityCredential | undefined): credenti
 
 function isValueCredential(credential: SecurityCredential | undefined): credential is { value: string } {
   return Boolean(credential) && typeof credential === 'object' && 'value' in credential;
+}
+
+type EnvScope = 'per-spec' | 'global';
+
+type Preferences = {
+  theme: 'light' | 'dark';
+  envScope: EnvScope;
+  onboardingCompleted: boolean;
+};
+
+const PREFS_STORAGE_KEY = 'better-openapi-viewer:prefs';
+
+const DEFAULT_PREFERENCES: Preferences = {
+  theme: 'light',
+  envScope: 'per-spec',
+  onboardingCompleted: false,
+};
+
+function readPersistedPreferences(): Preferences {
+  if (typeof window === 'undefined') {
+    return DEFAULT_PREFERENCES;
+  }
+  try {
+    const raw = window.localStorage.getItem(PREFS_STORAGE_KEY);
+    if (!raw) return DEFAULT_PREFERENCES;
+    const parsed = JSON.parse(raw) as Partial<Preferences>;
+    return { ...DEFAULT_PREFERENCES, ...parsed };
+  } catch {
+    return DEFAULT_PREFERENCES;
+  }
+}
+
+function writePersistedPreferences(prefs: Preferences) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(PREFS_STORAGE_KEY, JSON.stringify(prefs));
+  } catch {
+    // ignore storage errors (private mode, quota)
+  }
+}
+
+function usePreferences(): [Preferences, (patch: Partial<Preferences>) => void] {
+  const [prefs, setPrefs] = useState<Preferences>(() => readPersistedPreferences());
+  const update = useCallback((patch: Partial<Preferences>) => {
+    setPrefs((current) => {
+      const next = { ...current, ...patch };
+      writePersistedPreferences(next);
+      return next;
+    });
+  }, []);
+  return [prefs, update];
+}
+
+function ModalShell({
+  children,
+  labelledBy,
+  onClose,
+  dismissible = true,
+}: {
+  children: ReactNode;
+  labelledBy: string;
+  onClose?: () => void;
+  dismissible?: boolean;
+}) {
+  useEffect(() => {
+    if (!dismissible || !onClose) return;
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [dismissible, onClose]);
+
+  return (
+    <div className="bov-modal-overlay" role="presentation" onClick={dismissible ? onClose : undefined}>
+      <div
+        className="bov-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={labelledBy}
+        onClick={(event) => event.stopPropagation()}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function SettingsModal({
+  preferences,
+  onChange,
+  onClose,
+}: {
+  preferences: Preferences;
+  onChange: (patch: Partial<Preferences>) => void;
+  onClose: () => void;
+}) {
+  return (
+    <ModalShell labelledBy="bov-settings-title" onClose={onClose}>
+      <header className="bov-modal-header">
+        <div>
+          <p className="bov-kicker">Preferences</p>
+          <h2 id="bov-settings-title">Settings</h2>
+        </div>
+        <button type="button" className="bov-detail-close" onClick={onClose} aria-label="Close settings">
+          <span aria-hidden="true">×</span>
+        </button>
+      </header>
+      <div className="bov-modal-body">
+        <fieldset className="bov-pref-group">
+          <legend>Theme</legend>
+          <div className="bov-segmented">
+            <label>
+              <input
+                type="radio"
+                name="bov-pref-theme"
+                checked={preferences.theme === 'light'}
+                onChange={() => onChange({ theme: 'light' })}
+              />
+              <span>Light</span>
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="bov-pref-theme"
+                checked={preferences.theme === 'dark'}
+                onChange={() => onChange({ theme: 'dark' })}
+              />
+              <span>Dark</span>
+            </label>
+          </div>
+        </fieldset>
+        <fieldset className="bov-pref-group">
+          <legend>Environment scope</legend>
+          <p className="bov-pref-help">
+            Where saved servers, variables, and Try-it-out values are kept.
+          </p>
+          <div className="bov-segmented">
+            <label>
+              <input
+                type="radio"
+                name="bov-pref-env-scope"
+                checked={preferences.envScope === 'per-spec'}
+                onChange={() => onChange({ envScope: 'per-spec' })}
+              />
+              <span>Per spec</span>
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="bov-pref-env-scope"
+                checked={preferences.envScope === 'global'}
+                onChange={() => onChange({ envScope: 'global' })}
+              />
+              <span>Global</span>
+            </label>
+          </div>
+        </fieldset>
+      </div>
+      <footer className="bov-modal-footer">
+        <button type="button" className="bov-button bov-button-primary" onClick={onClose}>
+          Done
+        </button>
+      </footer>
+    </ModalShell>
+  );
+}
+
+function OnboardingModal({
+  preferences,
+  onComplete,
+}: {
+  preferences: Preferences;
+  onComplete: (patch: Partial<Preferences>) => void;
+}) {
+  const [scope, setScope] = useState<EnvScope>(preferences.envScope);
+  return (
+    <ModalShell labelledBy="bov-onboarding-title" dismissible={false}>
+      <header className="bov-modal-header">
+        <div>
+          <p className="bov-kicker">Welcome</p>
+          <h2 id="bov-onboarding-title">Quick setup</h2>
+        </div>
+      </header>
+      <div className="bov-modal-body">
+        <p className="bov-pref-help">
+          Where should saved servers, variables, and Try-it-out values live? You can change this any
+          time from Settings.
+        </p>
+        <fieldset className="bov-pref-group">
+          <legend>Environment scope</legend>
+          <label className="bov-pref-radio">
+            <input
+              type="radio"
+              name="bov-onboarding-scope"
+              checked={scope === 'per-spec'}
+              onChange={() => setScope('per-spec')}
+            />
+            <span>
+              <strong>Per spec</strong>
+              <small>Each API document keeps its own values. Best when working across unrelated APIs.</small>
+            </span>
+          </label>
+          <label className="bov-pref-radio">
+            <input
+              type="radio"
+              name="bov-onboarding-scope"
+              checked={scope === 'global'}
+              onChange={() => setScope('global')}
+            />
+            <span>
+              <strong>Global</strong>
+              <small>One shared bucket across every spec. Best for staging/prod variables you reuse everywhere.</small>
+            </span>
+          </label>
+        </fieldset>
+      </div>
+      <footer className="bov-modal-footer">
+        <button type="button" className="bov-button bov-button-primary" onClick={() => onComplete({ envScope: scope })}>
+          Get started
+        </button>
+      </footer>
+    </ModalShell>
+  );
 }
 
 function readPersistedAuthCredentials(document: OpenAPIObject): TryItOutAuthCredentials {

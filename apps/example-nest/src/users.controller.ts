@@ -45,6 +45,30 @@ export class UsersController {
     return { id: 'usr_3', role: 'member', ...body };
   }
 
+  @Get('search')
+  @ApiQuery({ name: 'q', required: true, description: 'Full-text search query.' })
+  @ApiQuery({ name: 'role', enum: ['admin', 'member'], required: false })
+  @ApiQuery({ name: 'limit', required: false, schema: { type: 'integer', minimum: 1, maximum: 100, default: 25 } })
+  @ApiQuery({ name: 'tag', required: false, isArray: true, description: 'Repeat to filter by multiple tags.' })
+  @ApiOkResponse({ description: 'Search users with required query parameters.' })
+  searchUsers(
+    @Query('q') q: string,
+    @Query('role') role?: string,
+    @Query('limit') limit?: string,
+    @Query('tag') tag?: string | string[],
+  ) {
+    return {
+      query: q,
+      role,
+      limit: limit ? Number(limit) : 25,
+      tags: Array.isArray(tag) ? tag : tag ? [tag] : [],
+      data: [
+        { id: 'usr_1', name: 'Ada Lovelace', role: 'admin' },
+        { id: 'usr_2', name: 'Grace Hopper', role: 'member' },
+      ].filter((user) => user.name.toLowerCase().includes(q.toLowerCase()) && (!role || user.role === role)),
+    };
+  }
+
   @Get(':id')
   @ApiOkResponse({ description: 'Get a user by id.' })
   getUser(@Param('id') id: string) {

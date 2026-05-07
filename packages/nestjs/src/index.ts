@@ -49,6 +49,7 @@ export function setupBetterOpenApiViewer(app: INestApplication, options: BetterO
   const staticAssets = options.staticAssets || undefined;
   const assetPath = normalizeRoute(staticAssets?.path ?? `${uiPath}/assets`);
   const bundledViewerAssetPath = `/${assetPath}/viewer.js`;
+  const bundledViewerStylePath = `/${assetPath}/viewer.css`;
 
   if (staticAssets) {
     staticAssets.serve?.({ app, path: `/${assetPath}` });
@@ -56,6 +57,10 @@ export function setupBetterOpenApiViewer(app: INestApplication, options: BetterO
 
   registerGet(app, bundledViewerAssetPath, async (_request, response) => {
     sendJavaScript(response, await readFile(require.resolve('@better-openapi-viewer/ui/browser'), 'utf8'));
+  });
+
+  registerGet(app, bundledViewerStylePath, async (_request, response) => {
+    sendCss(response, await readFile(require.resolve('@better-openapi-viewer/ui/browser-style'), 'utf8'));
   });
 
   specs.forEach((spec) => {
@@ -68,13 +73,13 @@ export function setupBetterOpenApiViewer(app: INestApplication, options: BetterO
     .filter((spec) => spec.uiPath !== uiPath)
     .forEach((spec) => {
       registerGet(app, `/${spec.uiPath}`, async (_request, response) => {
-        sendHtml(response, renderViewerHtmlForSpec(spec, specs, options, bundledViewerAssetPath, await spec.getDocument()));
+        sendHtml(response, renderViewerHtmlForSpec(spec, specs, options, bundledViewerAssetPath, bundledViewerStylePath, await spec.getDocument()));
       });
     });
 
   registerGet(app, `/${uiPath}`, async (_request, response) => {
     const spec = specs[0] as SpecEntry;
-    sendHtml(response, renderViewerHtmlForSpec(spec, specs, options, bundledViewerAssetPath, await spec.getDocument()));
+    sendHtml(response, renderViewerHtmlForSpec(spec, specs, options, bundledViewerAssetPath, bundledViewerStylePath, await spec.getDocument()));
   });
 }
 
@@ -179,6 +184,7 @@ function renderViewerHtmlForSpec(
   specs: SpecEntry[],
   options: BetterOpenApiViewerOptions,
   bundledViewerAssetPath: string,
+  bundledViewerStylePath: string,
   document: OpenAPIObject,
 ) {
   return renderViewerHtml({
@@ -190,6 +196,7 @@ function renderViewerHtmlForSpec(
       jsonPath: `/${item.jsonPath}`,
     })),
     bundledViewerAssetPath,
+    bundledViewerStylePath,
     customCss: options.customCss,
     customCssUrl: options.customCssUrl,
     customJs: options.customJs,
@@ -225,6 +232,7 @@ function renderViewerHtml({
   title,
   specs,
   bundledViewerAssetPath,
+  bundledViewerStylePath,
   customCss,
   customCssUrl,
   customJs,
@@ -236,6 +244,7 @@ function renderViewerHtml({
   title: string;
   specs: Array<{ name: string; path: string; jsonPath: string }>;
   bundledViewerAssetPath: string;
+  bundledViewerStylePath: string;
   customCss?: string;
   customCssUrl?: string | string[];
   customJs?: string;
@@ -272,29 +281,24 @@ function renderViewerHtml({
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>${escapedTitle}</title>
     ${faviconUrl ? `<link rel="icon" href="${escapeAttribute(faviconUrl)}" />` : ''}
+    <link rel="stylesheet" href="${escapeAttribute(bundledViewerStylePath)}" />
     ${cssLinks}
     <style>
-      :root { color-scheme: light dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
-      body { margin: 0; background: #f7f8fb; color: #151923; }
-      main { max-width: 1120px; margin: 0 auto; padding: 48px 24px; }
-      h1 { font-size: 40px; margin: 0 0 8px; }
-      nav { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 24px; }
-      nav a { border: 1px solid #ccd2df; border-radius: 8px; color: inherit; padding: 8px 10px; text-decoration: none; }
-      input { box-sizing: border-box; width: 100%; padding: 14px 16px; border: 1px solid #ccd2df; border-radius: 8px; font: inherit; }
-      ul { list-style: none; padding: 0; display: grid; gap: 10px; }
-      li { background: #fff; border: 1px solid #dfe4ee; border-radius: 8px; padding: 14px 16px; }
-      strong { display: inline-block; min-width: 72px; color: #0b6bcb; }
-      .muted { color: #596276; }
       ${customCss ?? ''}
     </style>
   </head>
   <body>
     <div data-better-openapi-viewer-root>
-      <main>
+      <main class="bov">
         ${specLinks}
-        <p class="muted">OpenAPI document: <a href="${jsonPath}">${jsonPath}</a></p>
-        <h1>${escapedTitle}</h1>
-        <p class="muted" role="status">Loading Better OpenAPI Viewer...</p>
+        <section class="bov-loading" aria-label="Loading API documentation">
+          <p class="bov-kicker">OpenAPI document: <a href="${jsonPath}">${jsonPath}</a></p>
+          <h1>${escapedTitle}</h1>
+          <p class="bov-muted" role="status">Loading Better OpenAPI Viewer...</p>
+          <div class="bov-skeleton-stack" aria-hidden="true">
+            <span></span><span></span><span></span>
+          </div>
+        </section>
       </main>
     </div>
     <script>
@@ -326,6 +330,12 @@ function sendHtml(response: HtmlResponse, value: string) {
 function sendJavaScript(response: HtmlResponse, value: string) {
   response.type?.('application/javascript');
   response.header?.('content-type', 'application/javascript');
+  response.send(value);
+}
+
+function sendCss(response: HtmlResponse, value: string) {
+  response.type?.('text/css');
+  response.header?.('content-type', 'text/css');
   response.send(value);
 }
 

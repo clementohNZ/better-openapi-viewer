@@ -32,7 +32,7 @@ boot().catch((error) => {
     return;
   }
 
-  target.innerHTML = `<main><p role="alert">${escapeHtml(error instanceof Error ? error.message : 'Unable to load OpenAPI document.')}</p></main>`;
+  target.innerHTML = `<main class="bov"><section class="bov-loading"><p class="bov-kicker" role="alert">Unable to load API documentation</p><h1>Request failed</h1><p class="bov-muted">${escapeHtml(error instanceof Error ? error.message : 'Unable to load OpenAPI document.')}</p></section></main>`;
 });
 
 function escapeHtml(value) {
