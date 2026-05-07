@@ -44,7 +44,7 @@ A richer, more usable OpenAPI reference and try-it-out client — built as a dro
 
 ## Features
 
-- **Operations sidebar** — all endpoints grouped by tag, searchable and filterable by HTTP method, tag, auth state, deprecation status, content type, and referenced model
+- **Operations sidebar** — all endpoints grouped by tag, searchable and filterable by HTTP method, tag, auth state, deprecation status, content type, and referenced model; HTTP method badges stretch to fill the full row height when a summary is present, and summaries are visually de-emphasised so the path stays prominent
 - **Persistent filters** — active filters are written to the URL as query params (`?method=get,post&tag=users&model=User`) so any filtered view can be bookmarked, copy-pasted, or shared and will restore exactly on reload; a **Reset** link clears everything in one click
 - **Reference panel** — path, method, operation ID, parameters table (query / header / path), request body schema, response schemas, security requirements, and server list — all at a glance
 - **Try it out** — fill parameters and a JSON body editor inline; sends the request from your browser with full header and cookie support

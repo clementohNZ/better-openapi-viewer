@@ -91,16 +91,33 @@
     font-size: 13px;
   }
 
-  /* === SHELL: 3 columns, full width === */
+  /* === SHELL: 3 columns + 2 resize handles, full width === */
   .bov-shell {
     @apply grid h-full;
     width: 100%;
-    grid-template-columns: 260px minmax(360px, 1fr) minmax(420px, 1.4fr);
+    grid-template-columns: var(--bov-sidebar-width, 260px) 4px var(--bov-content-width, minmax(360px, 1fr)) 4px minmax(420px, 1.4fr);
     min-width: 0;
   }
 
   .bov-shell > * {
     min-width: 0;
+  }
+
+  /* === RESIZE HANDLE === */
+  .bov-resize-handle {
+    width: 4px;
+    cursor: col-resize;
+    background: transparent;
+    border-left: 1px solid var(--bov-line);
+    transition: background 120ms;
+    position: relative;
+    z-index: 1;
+  }
+
+  .bov-resize-handle:hover,
+  .bov-resize-handle:active {
+    background: var(--bov-accent);
+    border-left-color: var(--bov-accent);
   }
 
   /* === SIDEBAR === */
@@ -482,11 +499,15 @@
   }
 
   .bov-row-trigger {
-    @apply grid w-full grid-cols-[60px_minmax(0,auto)_minmax(0,1fr)_auto] items-center gap-3 bg-transparent px-5 py-2 text-left transition-colors;
+    @apply grid w-full grid-cols-[60px_minmax(0,1fr)_auto] items-center gap-3 bg-transparent px-5 py-2 text-left transition-colors;
     border: 0;
     border-left: 2px solid transparent;
     color: var(--bov-text);
     cursor: pointer;
+  }
+
+  .bov-row-main {
+    @apply grid min-w-0 gap-0.5;
   }
 
   .bov-row-trigger:hover {
@@ -498,16 +519,23 @@
     border-left-color: var(--bov-accent);
   }
 
+  .bov-row-path-wrap {
+    overflow: hidden;
+    white-space: nowrap;
+  }
+
   .bov-row-path {
-    @apply truncate font-mono text-[12px];
+    @apply font-mono text-[12px];
     color: var(--bov-text);
-    background: transparent;
     padding: 0;
+    display: inline;
   }
 
   .bov-row-summary {
-    @apply truncate text-[12px];
+    @apply truncate text-[11px];
     color: var(--bov-muted);
+    display: block;
+    opacity: 0.7;
   }
 
   .bov-row-end {
@@ -780,6 +808,23 @@
     color: var(--bov-text);
   }
 
+  .bov-overview-copyable {
+    @apply flex min-w-0 items-center gap-2;
+  }
+
+  .bov-overview-copyable > code,
+  .bov-overview-copyable > span {
+    @apply min-w-0 flex-1 truncate;
+  }
+
+  .bov-overview-copyable .bov-copy-button {
+    @apply flex-none px-1.5 py-0.5 text-[10px] opacity-0 transition-opacity;
+  }
+
+  .bov-detail-stack dl:not(.bov-stats) > div:hover .bov-copy-button {
+    @apply opacity-100;
+  }
+
   /* === SHARED === */
   .bov-button,
   .bov-copy-button {
@@ -1021,6 +1066,11 @@
     border: 1px solid transparent;
   }
 
+  .bov-row-trigger .bov-method {
+    @apply flex items-center self-stretch;
+    padding: 0;
+  }
+
   .bov-method-get {
     color: #0a7c5a;
     background: rgba(10, 124, 90, 0.08);
@@ -1131,36 +1181,136 @@
   .bov[data-theme='dark'] code.bov-status-code[data-status-range='5xx'] { color: #e88080; background: rgba(232, 128, 128, 0.16); border-color: rgba(232, 128, 128, 0.32); }
 }
 
-/* === RESPONSIVE: stack panes on narrow screens === */
-@media (max-width: 1100px) {
-  .bov {
-    @apply h-auto overflow-auto;
-  }
+/* === MOBILE CONTROLS (hidden by default, shown via media query) === */
+.bov-mobile-overlay {
+  display: none;
+}
+
+.bov-mobile-filter-btn {
+  display: none;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--bov-line-strong);
+  background: var(--bov-surface);
+  color: var(--bov-text);
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 150ms;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.bov-mobile-filter-btn:hover {
+  background: var(--bov-surface-2);
+}
+
+.bov-mobile-filter-btn[data-active='true'] {
+  background: var(--bov-accent);
+  color: var(--bov-bg);
+  border-color: var(--bov-accent);
+}
+
+.bov-mobile-back {
+  display: none;
+  align-items: center;
+  gap: 4px;
+  padding: 0 0 8px 0;
+  border: none;
+  background: transparent;
+  color: var(--bov-faint);
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: color 150ms;
+  letter-spacing: 0.02em;
+}
+
+.bov-mobile-back:hover {
+  color: var(--bov-text);
+}
+
+.bov-content-header-actions {
+  @apply flex items-center gap-2;
+}
+
+/* === RESPONSIVE: mobile drawer + single-column navigation === */
+@media (max-width: 1099px) {
   .bov-shell {
     grid-template-columns: 1fr;
-    height: auto;
+    height: 100dvh;
   }
-  .bov-sidebar,
-  .bov-content,
-  .bov-detail {
-    overflow: visible;
-    height: auto;
-    border-right: 0;
-    border-left: 0;
-    border-bottom: 1px solid var(--bov-line);
+
+  .bov-resize-handle {
+    display: none;
   }
+
+  /* Show only the active mobile view */
+  .bov[data-mobile-view='list'] .bov-detail {
+    display: none;
+  }
+
+  .bov[data-mobile-view='detail'] .bov-content {
+    display: none;
+  }
+
+  /* Sidebar becomes a slide-in drawer */
+  .bov-sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: min(320px, 85vw);
+    height: 100dvh;
+    z-index: 40;
+    transform: translateX(-100%);
+    transition: transform 220ms cubic-bezier(0.4, 0, 0.2, 1);
+    border-right: 1px solid var(--bov-line-strong);
+    overflow-y: auto;
+  }
+
+  .bov-sidebar[data-mobile-open='true'] {
+    transform: translateX(0);
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.12);
+  }
+
+  /* Backdrop overlay */
+  .bov-mobile-overlay {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 39;
+    background: rgba(0, 0, 0, 0.35);
+    animation: bov-fade-in 150ms ease;
+  }
+
+  /* Content fills the full view */
   .bov-content {
-    grid-template-rows: auto auto;
+    @apply grid h-full min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden;
+    height: 100dvh;
   }
+
+  /* Detail panel fills the full view */
   .bov-detail {
-    grid-template-rows: auto auto auto;
+    @apply grid h-full min-w-0 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden;
+    height: 100dvh;
+    border-left: none;
   }
-  .bov-operation-groups,
-  .bov-detail-body {
-    overflow: visible;
+
+  /* Show mobile controls */
+  .bov-mobile-filter-btn {
+    display: inline-flex;
   }
-  .bov-tag-header {
-    position: static;
+
+  .bov-mobile-back {
+    display: inline-flex;
+  }
+
+  /* Hide desktop close button in favour of back button */
+  .bov-detail-close {
+    display: none;
   }
 }
 

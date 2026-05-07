@@ -370,6 +370,9 @@ function LoadedViewerApp({
     return raw ? raw.split(',') : [];
   });
   const [modelsModalOpen, setModelsModalOpen] = useState(false);
+  const isMobile = useIsMobile();
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+  const [mobileView, setMobileView] = useState<'list' | 'detail'>('list');
   const tryItOutEnabled = true;
   const theme = preferences.theme;
   const showOnboarding = !preferences.onboardingCompleted;
@@ -484,7 +487,61 @@ function LoadedViewerApp({
     () => (selectedOperationId ? operations.find((op) => op.id === selectedOperationId) ?? null : null),
     [operations, selectedOperationId],
   );
-  const closeDrawer = useCallback(() => setSelectedOperationId(null), []);
+  const closeDrawer = useCallback(() => {
+    setSelectedOperationId(null);
+    setMobileView('list');
+  }, []);
+
+  const PANEL_STORAGE_KEY = 'better-openapi-viewer:panel-widths';
+  const readSavedPanelWidths = (): { sidebar?: number; content?: number } => {
+    try { return JSON.parse(localStorage.getItem(PANEL_STORAGE_KEY) ?? '{}'); } catch { return {}; }
+  };
+  const savePanelWidths = (widths: { sidebar?: number; content?: number }) => {
+    try { localStorage.setItem(PANEL_STORAGE_KEY, JSON.stringify(widths)); } catch { /* ignore */ }
+  };
+
+  const [sidebarWidth, setSidebarWidth] = useState<number | null>(() => readSavedPanelWidths().sidebar ?? null);
+  const [contentWidth, setContentWidth] = useState<number | null>(() => readSavedPanelWidths().content ?? null);
+  const shellRef = useRef<HTMLDivElement>(null);
+
+  const makeDragHandler = useCallback((
+    getStartWidth: () => number,
+    setWidth: (w: number) => void,
+    min: number,
+    max: number,
+    saveKey: 'sidebar' | 'content',
+  ) => (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = getStartWidth();
+    let latest = startWidth;
+
+    const onMove = (ev: MouseEvent) => {
+      const delta = ev.clientX - startX;
+      latest = Math.max(min, Math.min(max, startWidth + delta));
+      setWidth(latest);
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      const saved = readSavedPanelWidths();
+      savePanelWidths({ ...saved, [saveKey]: latest });
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, []);
+
+  const onSidebarResizeDragStart = makeDragHandler(
+    () => sidebarWidth ?? shellRef.current?.querySelector<HTMLElement>('.bov-sidebar')?.offsetWidth ?? 260,
+    setSidebarWidth,
+    160, 480, 'sidebar',
+  );
+
+  const onContentResizeDragStart = makeDragHandler(
+    () => contentWidth ?? shellRef.current?.querySelector<HTMLElement>('.bov-content')?.offsetWidth ?? 420,
+    setContentWidth,
+    280, 900, 'content',
+  );
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -492,7 +549,10 @@ function LoadedViewerApp({
     if (hash.startsWith('#operation-')) {
       const id = hash.slice('#operation-'.length);
       const match = operations.find((op) => toDomId(op.id) === id);
-      if (match) setSelectedOperationId(match.id);
+      if (match) {
+        setSelectedOperationId(match.id);
+        setMobileView('detail');
+      }
     }
   }, [operations]);
 
@@ -525,9 +585,19 @@ function LoadedViewerApp({
   }, [query, selectedMethods, selectedTags, authFilter, deprecatedFilter, selectedContentTypes, selectedModels]);
 
   return (
-    <main className="bov" data-theme={theme}>
-      <div className="bov-shell">
-        <aside className="bov-sidebar" aria-label="API navigation and filters">
+    <main className="bov" data-theme={theme} data-mobile-view={mobileView}>
+      {mobileDrawerOpen ? (
+        <div className="bov-mobile-overlay" onClick={() => setMobileDrawerOpen(false)} aria-hidden="true" />
+      ) : null}
+      <div
+        className="bov-shell"
+        ref={shellRef}
+        style={{
+          ...(sidebarWidth != null ? { '--bov-sidebar-width': `${sidebarWidth}px` } : {}),
+          ...(contentWidth != null ? { '--bov-content-width': `${contentWidth}px` } : {}),
+        } as React.CSSProperties}
+      >
+        <aside className="bov-sidebar" aria-label="API navigation and filters" data-mobile-open={mobileDrawerOpen ? 'true' : 'false'}>
           <header className="bov-product">
             <div className="bov-product-toolbar">
               <div className="bov-product-toolbar-switcher">{specSwitcher}</div>
@@ -671,6 +741,7 @@ function LoadedViewerApp({
           )}
 
         </aside>
+        <div className="bov-resize-handle" onMouseDown={onSidebarResizeDragStart} role="separator" aria-label="Resize sidebar" title="Drag to resize" />
 
         <section className="bov-content" aria-labelledby="operations-heading">
           <header className="bov-content-header">
@@ -678,9 +749,21 @@ function LoadedViewerApp({
               <p className="bov-kicker">Workspace</p>
               <h2 id="operations-heading">Operations</h2>
             </div>
-            <p className="bov-muted bov-content-count">
-              {filteredOperations.length} of {operations.length} {operations.length === 1 ? 'endpoint' : 'endpoints'}
-            </p>
+            <div className="bov-content-header-actions">
+              <button
+                type="button"
+                className="bov-mobile-filter-btn"
+                data-active={activeFilterCount > 0 ? 'true' : 'false'}
+                onClick={() => setMobileDrawerOpen(true)}
+                aria-label="Open filters"
+              >
+                <svg aria-hidden="true" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M2 4h12M4 8h8M6 12h4"/></svg>
+                Filters{activeFilterCount ? ` (${activeFilterCount})` : ''}
+              </button>
+              <p className="bov-muted bov-content-count">
+                {filteredOperations.length} of {operations.length} {operations.length === 1 ? 'endpoint' : 'endpoints'}
+              </p>
+            </div>
           </header>
 
           {groupedOperations.length ? (
@@ -706,11 +789,21 @@ function LoadedViewerApp({
                             type="button"
                             data-active={isActive ? 'true' : 'false'}
                             aria-pressed={isActive}
-                            onClick={() => setSelectedOperationId(operation.id)}
+                            onClick={() => {
+                              setSelectedOperationId(operation.id);
+                              if (isMobile) {
+                                setMobileView('detail');
+                                setMobileDrawerOpen(false);
+                              }
+                            }}
                           >
                             <MethodLabel method={operation.method} />
-                            <code className="bov-row-path">{operation.path}</code>
-                            <span className="bov-row-summary">{operation.summary}</span>
+                            <div className="bov-row-main">
+                              <div className="bov-row-path-wrap">
+                                <code className="bov-row-path">{operation.path}</code>
+                              </div>
+                              {operation.summary ? <span className="bov-row-summary">{operation.summary}</span> : null}
+                            </div>
                             <span className="bov-row-end">
                               {operation.deprecated ? <span className="bov-pill bov-pill-warn">deprecated</span> : null}
                               {operation.requiresAuth ? <span className="bov-pill bov-pill-auth">Requires auth</span> : null}
@@ -728,6 +821,7 @@ function LoadedViewerApp({
             <EmptyState title="Nothing matches these filters" body="Clear a filter or search for a method, route, tag, operation id, parameter, or schema name." />
           )}
         </section>
+        <div className="bov-resize-handle" onMouseDown={onContentResizeDragStart} role="separator" aria-label="Resize panel" title="Drag to resize" />
         <OperationDetailPanel
           operation={selectedOperation}
           document={document}
@@ -741,6 +835,7 @@ function LoadedViewerApp({
           viewerConfig={viewerConfig}
           securitySchemes={securitySchemes}
           onClose={closeDrawer}
+          onBack={() => setMobileView('list')}
         />
       </div>
       {showOnboarding ? (
@@ -857,6 +952,7 @@ function OperationDetailPanel({
   viewerConfig,
   securitySchemes,
   onClose,
+  onBack,
 }: {
   operation: NormalizedOperation | null;
   document: OpenAPIObject;
@@ -870,6 +966,7 @@ function OperationDetailPanel({
   viewerConfig: ViewerConfig;
   securitySchemes: Record<string, SecuritySchemeObject>;
   onClose: () => void;
+  onBack?: () => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [tab, setTab] = useState<'docs' | 'try'>('docs');
@@ -897,6 +994,12 @@ function OperationDetailPanel({
     <aside className="bov-detail" aria-label={`${operation.method.toUpperCase()} ${operation.path}`}>
       <header className="bov-detail-header">
         <div className="bov-detail-title">
+          {onBack ? (
+            <button className="bov-mobile-back" type="button" onClick={onBack} aria-label="Back to operations">
+              <svg aria-hidden="true" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M10 3L5 8l5 5"/></svg>
+              Back
+            </button>
+          ) : null}
           <div className="bov-detail-line">
             <MethodLabel method={operation.method} />
             <code className="bov-detail-path">{operation.path}</code>
@@ -1073,22 +1176,27 @@ function OperationOverview({ document, operation }: { document: OpenAPIObject; o
         </div>
         <div>
           <dt>Path</dt>
-          <dd>
+          <dd className="bov-overview-copyable">
             <code>{operation.path}</code>
+            <CopyButton label="Copy path" value={operation.path} />
           </dd>
         </div>
         {operation.operationId ? (
           <div>
             <dt>Operation ID</dt>
-            <dd>
+            <dd className="bov-overview-copyable">
               <code>{operation.operationId}</code>
+              <CopyButton label="Copy operation ID" value={operation.operationId} />
             </dd>
           </div>
         ) : null}
         {operation.summary ? (
           <div>
             <dt>Summary</dt>
-            <dd>{operation.summary}</dd>
+            <dd className="bov-overview-copyable">
+              <span>{operation.summary}</span>
+              <CopyButton label="Copy summary" value={operation.summary} />
+            </dd>
           </div>
         ) : null}
         {operation.description ? (
@@ -4980,4 +5088,17 @@ function SpecLoadingState({
       ) : null}
     </section>
   );
+}
+
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window !== 'undefined' && window.matchMedia('(max-width: 1099px)').matches,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 1099px)');
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
+  return isMobile;
 }
