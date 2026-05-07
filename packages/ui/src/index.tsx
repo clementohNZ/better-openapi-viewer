@@ -1,4 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type CSSProperties,
+  type FormEvent,
+  type ReactNode,
+} from 'react';
+import yaml from 'js-yaml';
 import { EditorState } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
@@ -44,31 +56,54 @@ import {
   type ViewerConfig,
 } from '@clem/better-openapi-viewer-core';
 
+export type HostSpec = {
+  id?: string;
+  name: string;
+  jsonPath: string;
+  format?: 'auto' | 'json' | 'yaml';
+};
+
 export type BetterOpenApiViewerProps = {
-  document: OpenAPIObject;
+  document?: OpenAPIObject;
   config?: ViewerConfig & { preauthorizedCredentials?: TryItOutAuthCredentials };
   persistAuthorization?: boolean;
   preauthorizedCredentials?: TryItOutAuthCredentials;
+  hostSpecs?: HostSpec[];
+  initialSpecId?: string;
 };
 
-export function BetterOpenApiViewer({ document, config, persistAuthorization, preauthorizedCredentials }: BetterOpenApiViewerProps) {
-  const viewerConfig = useMemo(() => mergeViewerConfig(config, { persistAuthorization }), [config, persistAuthorization]);
-  const [query, setQuery] = useState('');
-  const [selectedMethods, setSelectedMethods] = useState<HttpMethod[]>([]);
-  const [selectedTags, setSelectedTags] = useState<string[]>([]);
-  const [authFilter, setAuthFilter] = useState<NonNullable<OperationFilter['auth']>>('any');
-  const [deprecatedFilter, setDeprecatedFilter] = useState('any');
-  const [selectedContentTypes, setSelectedContentTypes] = useState<string[]>([]);
-  const tryItOutEnabled = true;
-  const [preferences, updatePreferences] = usePreferences();
-  const theme = preferences.theme;
+export function BetterOpenApiViewer({
+  document: initialDocument,
+  config,
+  persistAuthorization,
+  preauthorizedCredentials,
+  hostSpecs,
+  initialSpecId,
+}: BetterOpenApiViewerProps) {
+  const [userSpecs, userSpecsApi] = useUserSpecs();
+  const allSpecs = useMemo(() => mergeSpecEntries(hostSpecs, userSpecs), [hostSpecs, userSpecs]);
+  const initialActiveId = useMemo(() => {
+    if (initialSpecId && allSpecs.some((spec) => spec.id === initialSpecId)) return initialSpecId;
+    const lastSelected = readLastSelectedSpecId();
+    if (lastSelected && allSpecs.some((spec) => spec.id === lastSelected)) return lastSelected;
+    return allSpecs[0]?.id ?? null;
+  }, [allSpecs, initialSpecId]);
+  const [activeSpecId, setActiveSpecId] = useState<string | null>(initialActiveId);
+  const [documents, setDocuments] = useState<Record<string, OpenAPIObject>>(() => {
+    if (!initialDocument || !activeSpecId) return {};
+    return { [activeSpecId]: initialDocument };
+  });
+  const [loadingSpecId, setLoadingSpecId] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<{ specId: string; message: string } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('appearance');
-  const showOnboarding = !preferences.onboardingCompleted;
   const openSettings = useCallback((tab: SettingsTab = 'appearance') => {
     setSettingsTab(tab);
     setSettingsOpen(true);
   }, []);
+  const closeSettings = useCallback(() => setSettingsOpen(false), []);
+  const [preferences, updatePreferences] = usePreferences();
+  const theme = preferences.theme;
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -85,30 +120,254 @@ export function BetterOpenApiViewer({ document, config, persistAuthorization, pr
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, []);
+
+  const activeSpec = useMemo(() => allSpecs.find((spec) => spec.id === activeSpecId) ?? null, [allSpecs, activeSpecId]);
+  const activeDocument = activeSpecId ? documents[activeSpecId] : undefined;
+
+  useEffect(() => {
+    if (!activeSpec || activeDocument) return;
+    let cancelled = false;
+    setLoadingSpecId(activeSpec.id);
+    setLoadError(null);
+    void loadSpecDocument(activeSpec)
+      .then((document) => {
+        if (cancelled) return;
+        setDocuments((prev) => ({ ...prev, [activeSpec.id]: document }));
+        setLoadingSpecId((current) => (current === activeSpec.id ? null : current));
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setLoadingSpecId((current) => (current === activeSpec.id ? null : current));
+        setLoadError({
+          specId: activeSpec.id,
+          message: error instanceof Error ? error.message : 'Failed to load spec.',
+        });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSpec, activeDocument]);
+
+  useEffect(() => {
+    writeLastSelectedSpecId(activeSpecId);
+  }, [activeSpecId]);
+
+  const switchSpec = useCallback((id: string) => {
+    setActiveSpecId(id);
+    setLoadError(null);
+  }, []);
+
+  const handleAddUserSpec = useCallback(
+    (spec: Omit<UserSpec, 'id' | 'addedAt'>) => {
+      const created = userSpecsApi.add(spec);
+      setActiveSpecId(created.id);
+      setLoadError(null);
+      return created;
+    },
+    [userSpecsApi],
+  );
+
+  const handleRemoveUserSpec = useCallback(
+    (id: string) => {
+      userSpecsApi.remove(id);
+      setDocuments((prev) => {
+        if (!(id in prev)) return prev;
+        const { [id]: _removed, ...rest } = prev;
+        return rest;
+      });
+      setActiveSpecId((current) => {
+        if (current !== id) return current;
+        const remaining = allSpecs.filter((spec) => spec.id !== id);
+        return remaining[0]?.id ?? null;
+      });
+    },
+    [allSpecs, userSpecsApi],
+  );
+
+  const handleImport = useCallback(
+    (payload: ExportedSettings, mode: 'merge' | 'replace') => {
+      applyImportedSettings(payload, mode, userSpecsApi);
+      if (typeof window !== 'undefined') {
+        window.location.reload();
+      }
+    },
+    [userSpecsApi],
+  );
+
+  const specSwitcher = (
+    <SpecSwitcher
+      specs={allSpecs}
+      activeSpecId={activeSpecId}
+      onSwitch={switchSpec}
+      onManage={() => openSettings('specs')}
+    />
+  );
+
+  const settingsModal = settingsOpen ? (
+    <SettingsModal
+      activeTab={settingsTab}
+      onTabChange={setSettingsTab}
+      preferences={preferences}
+      onChangePreferences={updatePreferences}
+      onClose={closeSettings}
+      activeDocument={activeDocument ?? null}
+      specs={allSpecs}
+      activeSpecId={activeSpecId}
+      onSwitchSpec={switchSpec}
+      onAddUserSpec={handleAddUserSpec}
+      onUpdateUserSpec={userSpecsApi.update}
+      onRemoveUserSpec={handleRemoveUserSpec}
+      userSpecs={userSpecs}
+      hostSpecs={allSpecs.filter((spec) => spec.source === 'host')}
+      onImport={handleImport}
+    />
+  ) : null;
+
+  if (!activeSpec) {
+    return (
+      <main className="bov" data-theme={theme}>
+        <NoSpecLoadedState onAddSpec={handleAddUserSpec} onOpenSettings={openSettings} specSwitcher={specSwitcher} />
+        {settingsModal}
+      </main>
+    );
+  }
+
+  if (!activeDocument) {
+    return (
+      <main className="bov" data-theme={theme}>
+        <SpecLoadingState
+          spec={activeSpec}
+          loading={loadingSpecId === activeSpec.id}
+          error={loadError && loadError.specId === activeSpec.id ? loadError.message : null}
+          onRetry={() => {
+            setLoadError(null);
+            setLoadingSpecId(activeSpec.id);
+            void loadSpecDocument(activeSpec)
+              .then((document) => {
+                setDocuments((prev) => ({ ...prev, [activeSpec.id]: document }));
+                setLoadingSpecId(null);
+              })
+              .catch((error: unknown) => {
+                setLoadingSpecId(null);
+                setLoadError({
+                  specId: activeSpec.id,
+                  message: error instanceof Error ? error.message : 'Failed to load spec.',
+                });
+              });
+          }}
+          onOpenSettings={openSettings}
+          specSwitcher={specSwitcher}
+        />
+        {settingsModal}
+      </main>
+    );
+  }
+
+  return (
+    <LoadedViewerApp
+      key={activeSpec.id}
+      document={activeDocument}
+      config={config}
+      persistAuthorization={persistAuthorization}
+      preauthorizedCredentials={preauthorizedCredentials}
+      preferences={preferences}
+      onChangePreferences={updatePreferences}
+      settingsOpen={settingsOpen}
+      settingsTab={settingsTab}
+      onOpenSettings={openSettings}
+      onCloseSettings={closeSettings}
+      onChangeSettingsTab={setSettingsTab}
+      specs={allSpecs}
+      activeSpecId={activeSpecId}
+      onSwitchSpec={switchSpec}
+      userSpecs={userSpecs}
+      onAddUserSpec={handleAddUserSpec}
+      onUpdateUserSpec={userSpecsApi.update}
+      onRemoveUserSpec={handleRemoveUserSpec}
+      onImport={handleImport}
+      specSwitcher={specSwitcher}
+    />
+  );
+}
+
+type LoadedViewerAppProps = BetterOpenApiViewerProps & {
+  document: OpenAPIObject;
+  preferences: Preferences;
+  onChangePreferences: (patch: Partial<Preferences>) => void;
+  settingsOpen: boolean;
+  settingsTab: SettingsTab;
+  onOpenSettings: (tab?: SettingsTab) => void;
+  onCloseSettings: () => void;
+  onChangeSettingsTab: (tab: SettingsTab) => void;
+  specs: SpecEntry[];
+  activeSpecId: string | null;
+  onSwitchSpec: (id: string) => void;
+  userSpecs: UserSpec[];
+  onAddUserSpec: (spec: Omit<UserSpec, 'id' | 'addedAt'>) => UserSpec;
+  onUpdateUserSpec: (spec: UserSpec) => void;
+  onRemoveUserSpec: (id: string) => void;
+  onImport: (payload: ExportedSettings, mode: 'merge' | 'replace') => void;
+  specSwitcher: ReactNode;
+};
+
+function LoadedViewerApp({
+  document,
+  config,
+  persistAuthorization,
+  preauthorizedCredentials,
+  preferences,
+  onChangePreferences,
+  settingsOpen,
+  settingsTab,
+  onOpenSettings,
+  onCloseSettings,
+  onChangeSettingsTab,
+  specs,
+  activeSpecId,
+  onSwitchSpec,
+  userSpecs,
+  onAddUserSpec,
+  onUpdateUserSpec,
+  onRemoveUserSpec,
+  onImport,
+  specSwitcher,
+}: LoadedViewerAppProps) {
+  const viewerConfig = useMemo(() => mergeViewerConfig(config, { persistAuthorization }), [config, persistAuthorization]);
+  const [query, setQuery] = useState('');
+  const [selectedMethods, setSelectedMethods] = useState<HttpMethod[]>([]);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [authFilter, setAuthFilter] = useState<NonNullable<OperationFilter['auth']>>('any');
+  const [deprecatedFilter, setDeprecatedFilter] = useState('any');
+  const [selectedContentTypes, setSelectedContentTypes] = useState<string[]>([]);
+  const tryItOutEnabled = true;
+  const theme = preferences.theme;
+  const showOnboarding = !preferences.onboardingCompleted;
+  const openSettings = onOpenSettings;
   const operations = useMemo(() => sortOperations(getOperations(document), viewerConfig.operationsSorter), [document, viewerConfig.operationsSorter]);
   const [selectedOperationId, setSelectedOperationId] = useState<string | null>(() => operations[0]?.id ?? null);
   const securitySchemes = useMemo(() => getSupportedSecuritySchemes(document), [document]);
   const componentSchemas = useMemo(() => getComponentSchemas(document), [document]);
+  const specStorageId = activeSpecId ?? 'default';
   const initialPreauthorizedCredentials = useMemo(
     () =>
       mergeCredentials(
         config?.preauthorizedCredentials,
         preauthorizedCredentials,
-        viewerConfig.persistAuthorization ? readPersistedAuthCredentials(document) : {},
+        viewerConfig.persistAuthorization ? readPersistedAuthCredentials(specStorageId) : {},
       ),
-    [config?.preauthorizedCredentials, document, preauthorizedCredentials, viewerConfig.persistAuthorization],
+    [config?.preauthorizedCredentials, specStorageId, preauthorizedCredentials, viewerConfig.persistAuthorization],
   );
   const {
     state: serversState,
     setActive: setActiveServer,
     upsertServer,
     removeServer,
-  } = useSavedServers(document, initialPreauthorizedCredentials);
+  } = useSavedServers(specStorageId, document, initialPreauthorizedCredentials);
   const activeServer = useMemo(
     () => serversState.servers.find((server) => server.id === serversState.activeId) ?? serversState.servers[0] ?? null,
     [serversState],
   );
-  const [cookiesByServer, setCookiesForServer] = useCookieStore(document, serversState.servers);
+  const [cookiesByServer, setCookiesForServer] = useCookieStore(specStorageId, serversState.servers);
   const activeServerCookies = activeServer ? cookiesByServer[activeServer.id] ?? [] : [];
   const updateActiveServerCookies = useCallback(
     (updater: (prev: SavedCookie[]) => SavedCookie[]) => {
@@ -192,18 +451,23 @@ export function BetterOpenApiViewer({ document, config, persistAuthorization, pr
       <div className="bov-shell">
         <aside className="bov-sidebar" aria-label="API navigation and filters">
           <header className="bov-product">
-            <button
-              type="button"
-              className="bov-product-gear"
-              aria-label="Open settings"
-              title={`Settings (${getSettingsShortcutLabel()})`}
-              onClick={() => openSettings('appearance')}
-            >
-              <svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="3" />
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-              </svg>
-            </button>
+            <div className="bov-product-toolbar">
+              <div className="bov-product-toolbar-switcher">
+                {specs.length > 1 ? specSwitcher : null}
+              </div>
+              <button
+                type="button"
+                className="bov-product-gear"
+                aria-label="Open settings"
+                title={`Settings (${getSettingsShortcutLabel()})`}
+                onClick={() => openSettings('appearance')}
+              >
+                <svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="3" />
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                </svg>
+              </button>
+            </div>
             <p className="bov-kicker">API Reference</p>
             <h1>{document.info?.title ?? 'OpenAPI'}</h1>
             <p className="bov-version">v{document.info?.version ?? '—'}</p>
@@ -357,12 +621,12 @@ export function BetterOpenApiViewer({ document, config, persistAuthorization, pr
                           >
                             <MethodLabel method={operation.method} />
                             <code className="bov-row-path">{operation.path}</code>
-                            <span className="bov-row-summary">
-                              {operation.summary ?? <span className="bov-faint-text">—</span>}
+                            <span className="bov-row-summary">{operation.summary}</span>
+                            <span className="bov-row-end">
+                              {operation.deprecated ? <span className="bov-pill bov-pill-warn">deprecated</span> : null}
+                              {operation.requiresAuth ? <span className="bov-pill bov-pill-auth">Requires auth</span> : null}
+                              <span className="bov-row-arrow" aria-hidden="true">→</span>
                             </span>
-                            {operation.deprecated ? <span className="bov-pill bov-pill-warn">deprecated</span> : null}
-                            {operation.requiresAuth ? <span className="bov-pill" title="Requires auth" aria-label="Requires auth">●</span> : null}
-                            <span className="bov-row-arrow" aria-hidden="true">→</span>
                           </button>
                         </li>
                       );
@@ -393,16 +657,17 @@ export function BetterOpenApiViewer({ document, config, persistAuthorization, pr
       {showOnboarding ? (
         <OnboardingModal
           preferences={preferences}
-          onComplete={(patch) => updatePreferences({ ...patch, onboardingCompleted: true })}
+          onComplete={(patch) => onChangePreferences({ ...patch, onboardingCompleted: true })}
         />
       ) : null}
       {settingsOpen ? (
         <SettingsModal
           activeTab={settingsTab}
-          onTabChange={setSettingsTab}
+          onTabChange={onChangeSettingsTab}
           preferences={preferences}
-          onChangePreferences={updatePreferences}
-          onClose={() => setSettingsOpen(false)}
+          onChangePreferences={onChangePreferences}
+          onClose={onCloseSettings}
+          activeDocument={document}
           serversState={serversState}
           onSetActiveServer={setActiveServer}
           onUpsertServer={upsertServer}
@@ -410,6 +675,15 @@ export function BetterOpenApiViewer({ document, config, persistAuthorization, pr
           cookiesByServer={cookiesByServer}
           onSetCookiesForServer={setCookiesForServer}
           schemes={securitySchemes}
+          specs={specs}
+          activeSpecId={activeSpecId}
+          onSwitchSpec={onSwitchSpec}
+          userSpecs={userSpecs}
+          hostSpecs={specs.filter((spec) => spec.source === 'host')}
+          onAddUserSpec={onAddUserSpec}
+          onUpdateUserSpec={onUpdateUserSpec}
+          onRemoveUserSpec={onRemoveUserSpec}
+          onImport={onImport}
         />
       ) : null}
     </main>
@@ -1194,32 +1468,43 @@ function SecuritySchemeCredentialField({
 }
 
 function Security({ security, schemes }: { security: SecurityRequirementObject[]; schemes: Record<string, SecuritySchemeObject> }) {
+  if (!security.length) {
+    return (
+      <section>
+        <h4>Security</h4>
+        <p>No security requirements.</p>
+      </section>
+    );
+  }
+
   return (
     <section>
       <h4>Security</h4>
-      {security.length ? (
-        <ul>
-          {security.map((requirement, index) => (
-            <li key={index}>
-              {Object.keys(requirement).length ? (
-                <ul>
-                  {Object.entries(requirement).map(([schemeName, scopes]) => (
-                    <li key={schemeName}>
+      {security.map((requirement, index) => {
+        const entries = Object.entries(requirement);
+        return (
+          <Fragment key={index}>
+            {index > 0 ? <p className="bov-faint-text">or</p> : null}
+            {entries.length ? (
+              <dl>
+                {entries.map(([schemeName, scopes]) => (
+                  <div key={schemeName}>
+                    <dt>
                       <code>{schemeName}</code>
-                      {schemes[schemeName] ? ` (${getSecuritySchemeLabel(schemes[schemeName])})` : null}
-                      {scopes.length ? ` scopes: ${scopes.join(', ')}` : null}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <span>Anonymous access allowed.</span>
-              )}
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p>No security requirements.</p>
-      )}
+                    </dt>
+                    <dd>
+                      {schemes[schemeName] ? getSecuritySchemeLabel(schemes[schemeName]) : <span className="bov-faint-text">Unknown scheme</span>}
+                      {scopes.length ? ` · scopes: ${scopes.join(', ')}` : null}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            ) : (
+              <p>Anonymous access allowed.</p>
+            )}
+          </Fragment>
+        );
+      })}
     </section>
   );
 }
@@ -1229,14 +1514,16 @@ function Servers({ servers }: { servers: ServerObject[] }) {
     <section>
       <h4>Servers</h4>
       {servers.length ? (
-        <ul>
-          {servers.map((server) => (
-            <li key={server.url}>
-              <code>{server.url}</code>
-              {server.description ? <p>{server.description}</p> : null}
-            </li>
+        <dl>
+          {servers.map((server, index) => (
+            <div key={`${server.url}:${index}`}>
+              <dt>{server.description?.trim() || `Server ${index + 1}`}</dt>
+              <dd>
+                <code>{server.url}</code>
+              </dd>
+            </div>
           ))}
-        </ul>
+        </dl>
       ) : (
         <p>No operation-specific servers.</p>
       )}
@@ -2684,41 +2971,68 @@ function ModalShell({
   );
 }
 
-type SettingsTab = 'appearance' | 'servers' | 'cookies';
+type SettingsTab = 'appearance' | 'servers' | 'cookies' | 'specs' | 'data';
 
-const SETTINGS_TABS: Array<{ id: SettingsTab; label: string }> = [
+const SETTINGS_TABS: Array<{ id: SettingsTab; label: string; requiresDocument?: boolean }> = [
   { id: 'appearance', label: 'Appearance' },
-  { id: 'servers', label: 'Servers' },
-  { id: 'cookies', label: 'Cookies' },
+  { id: 'specs', label: 'Specs' },
+  { id: 'servers', label: 'Servers', requiresDocument: true },
+  { id: 'cookies', label: 'Cookies', requiresDocument: true },
+  { id: 'data', label: 'Data' },
 ];
 
-function SettingsModal({
-  activeTab,
-  onTabChange,
-  preferences,
-  onChangePreferences,
-  onClose,
-  serversState,
-  onSetActiveServer,
-  onUpsertServer,
-  onRemoveServer,
-  cookiesByServer,
-  onSetCookiesForServer,
-  schemes,
-}: {
+type SettingsModalProps = {
   activeTab: SettingsTab;
   onTabChange: (tab: SettingsTab) => void;
   preferences: Preferences;
   onChangePreferences: (patch: Partial<Preferences>) => void;
   onClose: () => void;
-  serversState: SavedServersState;
-  onSetActiveServer: (id: string) => void;
-  onUpsertServer: (server: SavedServer) => void;
-  onRemoveServer: (id: string) => void;
-  cookiesByServer: Record<string, SavedCookie[]>;
-  onSetCookiesForServer: (serverId: string, updater: (prev: SavedCookie[]) => SavedCookie[]) => void;
-  schemes: Record<string, SecuritySchemeObject>;
-}) {
+  activeDocument: OpenAPIObject | null;
+  serversState?: SavedServersState;
+  onSetActiveServer?: (id: string) => void;
+  onUpsertServer?: (server: SavedServer) => void;
+  onRemoveServer?: (id: string) => void;
+  cookiesByServer?: Record<string, SavedCookie[]>;
+  onSetCookiesForServer?: (serverId: string, updater: (prev: SavedCookie[]) => SavedCookie[]) => void;
+  schemes?: Record<string, SecuritySchemeObject>;
+  specs: SpecEntry[];
+  activeSpecId: string | null;
+  onSwitchSpec: (id: string) => void;
+  userSpecs: UserSpec[];
+  hostSpecs: SpecEntry[];
+  onAddUserSpec: (spec: Omit<UserSpec, 'id' | 'addedAt'>) => UserSpec;
+  onUpdateUserSpec: (spec: UserSpec) => void;
+  onRemoveUserSpec: (id: string) => void;
+  onImport: (payload: ExportedSettings, mode: 'merge' | 'replace') => void;
+};
+
+function SettingsModal(props: SettingsModalProps) {
+  const {
+    activeTab,
+    onTabChange,
+    preferences,
+    onChangePreferences,
+    onClose,
+    activeDocument,
+    serversState,
+    onSetActiveServer,
+    onUpsertServer,
+    onRemoveServer,
+    cookiesByServer,
+    onSetCookiesForServer,
+    schemes,
+    specs,
+    activeSpecId,
+    onSwitchSpec,
+    userSpecs,
+    hostSpecs,
+    onAddUserSpec,
+    onUpdateUserSpec,
+    onRemoveUserSpec,
+    onImport,
+  } = props;
+  const visibleTabs = SETTINGS_TABS.filter((tab) => !tab.requiresDocument || activeDocument);
+  const effectiveTab: SettingsTab = visibleTabs.some((tab) => tab.id === activeTab) ? activeTab : 'specs';
   return (
     <ModalShell labelledBy="bov-settings-title" onClose={onClose} className="bov-modal-wide">
       <div className="bov-settings-shell">
@@ -2728,12 +3042,12 @@ function SettingsModal({
             <h2 id="bov-settings-title">Settings</h2>
           </div>
           <nav>
-            {SETTINGS_TABS.map((tab) => (
+            {visibleTabs.map((tab) => (
               <button
                 key={tab.id}
                 type="button"
                 className="bov-settings-tab"
-                data-active={activeTab === tab.id ? 'true' : 'false'}
+                data-active={effectiveTab === tab.id ? 'true' : 'false'}
                 onClick={() => onTabChange(tab.id)}
               >
                 {tab.label}
@@ -2743,15 +3057,15 @@ function SettingsModal({
         </aside>
         <div className="bov-settings-main">
           <header className="bov-settings-main-header">
-            <h3>{SETTINGS_TABS.find((t) => t.id === activeTab)?.label}</h3>
+            <h3>{visibleTabs.find((t) => t.id === effectiveTab)?.label}</h3>
             <button type="button" className="bov-detail-close" onClick={onClose} aria-label="Close settings">
               <span aria-hidden="true">×</span>
             </button>
           </header>
           <div className="bov-settings-main-body">
-            {activeTab === 'appearance' ? (
+            {effectiveTab === 'appearance' ? (
               <AppearanceTab preferences={preferences} onChange={onChangePreferences} />
-            ) : activeTab === 'servers' ? (
+            ) : effectiveTab === 'servers' && serversState && schemes && onSetActiveServer && onUpsertServer && onRemoveServer ? (
               <ServersTab
                 serversState={serversState}
                 schemes={schemes}
@@ -2759,13 +3073,25 @@ function SettingsModal({
                 onUpsertServer={onUpsertServer}
                 onRemoveServer={onRemoveServer}
               />
-            ) : (
+            ) : effectiveTab === 'cookies' && serversState && cookiesByServer && onSetCookiesForServer ? (
               <CookiesTab
                 serversState={serversState}
                 cookiesByServer={cookiesByServer}
                 onSetCookiesForServer={onSetCookiesForServer}
               />
-            )}
+            ) : effectiveTab === 'specs' ? (
+              <SpecsTab
+                specs={specs}
+                activeSpecId={activeSpecId}
+                onSwitchSpec={onSwitchSpec}
+                userSpecs={userSpecs}
+                onAddUserSpec={onAddUserSpec}
+                onUpdateUserSpec={onUpdateUserSpec}
+                onRemoveUserSpec={onRemoveUserSpec}
+              />
+            ) : effectiveTab === 'data' ? (
+              <DataTab userSpecs={userSpecs} hostSpecs={hostSpecs} onImport={onImport} />
+            ) : null}
           </div>
         </div>
       </div>
@@ -2961,20 +3287,7 @@ function ServerForm({
           />
           <p className="bov-faint-text bov-server-form-id">id: {server.id}</p>
         </div>
-        <div className="bov-server-form-actions">
-          {isActive ? (
-            <span className="bov-pill bov-pill-active">Active</span>
-          ) : (
-            <button type="button" className="bov-button" onClick={onSetActive}>
-              Set active
-            </button>
-          )}
-          {server.source === 'user' ? (
-            <button type="button" className="bov-button bov-button-quiet" onClick={onRemove}>
-              Remove
-            </button>
-          ) : null}
-        </div>
+        {isActive ? <span className="bov-pill bov-pill-active">Active</span> : null}
       </header>
 
       <fieldset className="bov-pref-group">
@@ -3023,6 +3336,30 @@ function ServerForm({
           <p className="bov-muted">No supported security schemes in this spec.</p>
         )}
       </fieldset>
+
+      <footer className="bov-server-form-footer">
+        {isActive ? null : (
+          <button type="button" className="bov-button" onClick={onSetActive}>
+            Set active
+          </button>
+        )}
+        {server.source === 'user' ? (
+          <button
+            type="button"
+            className="bov-button bov-button-danger"
+            onClick={() => {
+              if (
+                typeof window !== 'undefined' &&
+                window.confirm(`Remove server “${server.label || server.url || server.id}”? This cannot be undone.`)
+              ) {
+                onRemove();
+              }
+            }}
+          >
+            Remove server
+          </button>
+        ) : null}
+      </footer>
     </div>
   );
 }
@@ -3286,49 +3623,45 @@ function generateId() {
   return Math.random().toString(36).slice(2, 10);
 }
 
-function getSpecKey(document: OpenAPIObject) {
-  return `${document.info?.title ?? 'OpenAPI'}:${document.info?.version ?? ''}`;
-}
-
-function readPersistedAuthCredentials(document: OpenAPIObject): TryItOutAuthCredentials {
+function readPersistedAuthCredentials(specId: string): TryItOutAuthCredentials {
   if (typeof window === 'undefined') {
     return {};
   }
 
   try {
-    const value = window.localStorage.getItem(getAuthStorageKey(document));
+    const value = window.localStorage.getItem(getAuthStorageKey(specId));
     return value ? (JSON.parse(value) as TryItOutAuthCredentials) : {};
   } catch {
     return {};
   }
 }
 
-function getAuthStorageKey(document: OpenAPIObject) {
-  return `better-openapi-viewer:auth:${getSpecKey(document)}`;
+function getAuthStorageKey(specId: string) {
+  return `better-openapi-viewer:auth:${specId}`;
 }
 
-function getServersStorageKey(document: OpenAPIObject) {
-  return `better-openapi-viewer:servers:${getSpecKey(document)}`;
+function getServersStorageKey(specId: string) {
+  return `better-openapi-viewer:servers:${specId}`;
 }
 
-function getCookiesStorageKey(document: OpenAPIObject, serverId: string) {
-  return `better-openapi-viewer:cookies:${getSpecKey(document)}:${serverId}`;
+function getCookiesStorageKey(specId: string, serverId: string) {
+  return `better-openapi-viewer:cookies:${specId}:${serverId}`;
 }
 
-function readPersistedServers(document: OpenAPIObject): SavedServersState | null {
+function readPersistedServers(specId: string): SavedServersState | null {
   if (typeof window === 'undefined') return null;
   try {
-    const raw = window.localStorage.getItem(getServersStorageKey(document));
+    const raw = window.localStorage.getItem(getServersStorageKey(specId));
     return raw ? (JSON.parse(raw) as SavedServersState) : null;
   } catch {
     return null;
   }
 }
 
-function writePersistedServers(document: OpenAPIObject, state: SavedServersState) {
+function writePersistedServers(specId: string, state: SavedServersState) {
   if (typeof window === 'undefined') return;
   try {
-    window.localStorage.setItem(getServersStorageKey(document), JSON.stringify(state));
+    window.localStorage.setItem(getServersStorageKey(specId), JSON.stringify(state));
   } catch {
     // ignore
   }
@@ -3352,20 +3685,20 @@ function buildInitialServersState(
   return { servers, activeId: servers[0]?.id ?? null };
 }
 
-function useSavedServers(document: OpenAPIObject, preauthorized: TryItOutAuthCredentials) {
+function useSavedServers(specId: string, document: OpenAPIObject, preauthorized: TryItOutAuthCredentials) {
   const [state, setState] = useState<SavedServersState>(
-    () => readPersistedServers(document) ?? buildInitialServersState(document, preauthorized),
+    () => readPersistedServers(specId) ?? buildInitialServersState(document, preauthorized),
   );
 
   const apply = useCallback(
     (updater: (prev: SavedServersState) => SavedServersState) => {
       setState((prev) => {
         const next = updater(prev);
-        writePersistedServers(document, next);
+        writePersistedServers(specId, next);
         return next;
       });
     },
-    [document],
+    [specId],
   );
 
   const setActive = useCallback(
@@ -3399,34 +3732,34 @@ function useSavedServers(document: OpenAPIObject, preauthorized: TryItOutAuthCre
   return { state, setActive, upsertServer, removeServer };
 }
 
-function readPersistedCookies(document: OpenAPIObject, serverId: string): SavedCookie[] {
+function readPersistedCookies(specId: string, serverId: string): SavedCookie[] {
   if (typeof window === 'undefined') return [];
   try {
-    const raw = window.localStorage.getItem(getCookiesStorageKey(document, serverId));
+    const raw = window.localStorage.getItem(getCookiesStorageKey(specId, serverId));
     return raw ? (JSON.parse(raw) as SavedCookie[]) : [];
   } catch {
     return [];
   }
 }
 
-function writePersistedCookies(document: OpenAPIObject, serverId: string, cookies: SavedCookie[]) {
+function writePersistedCookies(specId: string, serverId: string, cookies: SavedCookie[]) {
   if (typeof window === 'undefined') return;
   try {
     if (cookies.length) {
-      window.localStorage.setItem(getCookiesStorageKey(document, serverId), JSON.stringify(cookies));
+      window.localStorage.setItem(getCookiesStorageKey(specId, serverId), JSON.stringify(cookies));
     } else {
-      window.localStorage.removeItem(getCookiesStorageKey(document, serverId));
+      window.localStorage.removeItem(getCookiesStorageKey(specId, serverId));
     }
   } catch {
     // ignore
   }
 }
 
-function useCookieStore(document: OpenAPIObject, servers: SavedServer[]) {
+function useCookieStore(specId: string, servers: SavedServer[]) {
   const [cookiesByServer, setCookiesByServer] = useState<Record<string, SavedCookie[]>>(() => {
     const initial: Record<string, SavedCookie[]> = {};
     for (const server of servers) {
-      initial[server.id] = readPersistedCookies(document, server.id);
+      initial[server.id] = readPersistedCookies(specId, server.id);
     }
     return initial;
   });
@@ -3437,24 +3770,24 @@ function useCookieStore(document: OpenAPIObject, servers: SavedServer[]) {
       const next = { ...prev };
       for (const server of servers) {
         if (!(server.id in next)) {
-          next[server.id] = readPersistedCookies(document, server.id);
+          next[server.id] = readPersistedCookies(specId, server.id);
           changed = true;
         }
       }
       return changed ? next : prev;
     });
-  }, [document, servers]);
+  }, [specId, servers]);
 
   const setCookiesForServer = useCallback(
     (serverId: string, updater: (prev: SavedCookie[]) => SavedCookie[]) => {
       setCookiesByServer((prev) => {
         const current = prev[serverId] ?? [];
         const next = updater(current);
-        writePersistedCookies(document, serverId, next);
+        writePersistedCookies(specId, serverId, next);
         return { ...prev, [serverId]: next };
       });
     },
-    [document],
+    [specId],
   );
 
   return [cookiesByServer, setCookiesForServer] as const;
@@ -3562,4 +3895,870 @@ function toDomId(value: string) {
 function getSettingsShortcutLabel() {
   if (typeof navigator === 'undefined') return 'Ctrl+,';
   return /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘,' : 'Ctrl+,';
+}
+
+// ---------- User specs (origin-scoped) ----------
+
+export type UserSpec = {
+  id: string;
+  name: string;
+  url: string;
+  format: 'auto' | 'json' | 'yaml';
+  addedAt: string;
+};
+
+export type SpecEntry = {
+  id: string;
+  name: string;
+  source: 'host' | 'user';
+  jsonPath?: string;
+  url?: string;
+  format?: 'auto' | 'json' | 'yaml';
+};
+
+const USER_SPECS_STORAGE_KEY = 'better-openapi-viewer:user-specs';
+const LAST_SPEC_STORAGE_KEY = 'better-openapi-viewer:last-spec';
+
+function readUserSpecs(): UserSpec[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(USER_SPECS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((entry): entry is UserSpec =>
+      Boolean(entry) && typeof entry === 'object' && typeof entry.id === 'string' && typeof entry.url === 'string',
+    );
+  } catch {
+    return [];
+  }
+}
+
+function writeUserSpecs(specs: UserSpec[]) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(USER_SPECS_STORAGE_KEY, JSON.stringify(specs));
+  } catch {
+    // ignore quota / private mode errors
+  }
+}
+
+function readLastSelectedSpecId(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.localStorage.getItem(LAST_SPEC_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeLastSelectedSpecId(id: string | null) {
+  if (typeof window === 'undefined') return;
+  try {
+    if (id) {
+      window.localStorage.setItem(LAST_SPEC_STORAGE_KEY, id);
+    } else {
+      window.localStorage.removeItem(LAST_SPEC_STORAGE_KEY);
+    }
+  } catch {
+    // ignore
+  }
+}
+
+type UserSpecsApi = {
+  add: (spec: Omit<UserSpec, 'id' | 'addedAt'>) => UserSpec;
+  update: (spec: UserSpec) => void;
+  remove: (id: string) => void;
+  replaceAll: (specs: UserSpec[]) => void;
+};
+
+function useUserSpecs(): [UserSpec[], UserSpecsApi] {
+  const [specs, setSpecs] = useState<UserSpec[]>(() => readUserSpecs());
+
+  const apply = useCallback((updater: (prev: UserSpec[]) => UserSpec[]) => {
+    setSpecs((prev) => {
+      const next = updater(prev);
+      writeUserSpecs(next);
+      return next;
+    });
+  }, []);
+
+  const add = useCallback(
+    (spec: Omit<UserSpec, 'id' | 'addedAt'>) => {
+      const created: UserSpec = {
+        id: `user-${generateId()}`,
+        addedAt: new Date().toISOString(),
+        ...spec,
+      };
+      apply((prev) => [...prev, created]);
+      return created;
+    },
+    [apply],
+  );
+
+  const update = useCallback(
+    (spec: UserSpec) => apply((prev) => prev.map((entry) => (entry.id === spec.id ? spec : entry))),
+    [apply],
+  );
+
+  const remove = useCallback((id: string) => apply((prev) => prev.filter((entry) => entry.id !== id)), [apply]);
+
+  const replaceAll = useCallback(
+    (next: UserSpec[]) => {
+      writeUserSpecs(next);
+      setSpecs(next);
+    },
+    [],
+  );
+
+  return [specs, useMemo(() => ({ add, update, remove, replaceAll }), [add, update, remove, replaceAll])];
+}
+
+function mergeSpecEntries(host: HostSpec[] | undefined, user: UserSpec[]): SpecEntry[] {
+  const entries: SpecEntry[] = [];
+  (host ?? []).forEach((spec, index) => {
+    entries.push({
+      id: spec.id ?? `host-${index}`,
+      name: spec.name,
+      source: 'host',
+      jsonPath: spec.jsonPath,
+      format: spec.format,
+    });
+  });
+  user.forEach((spec) => {
+    entries.push({
+      id: spec.id,
+      name: spec.name,
+      source: 'user',
+      url: spec.url,
+      format: spec.format,
+    });
+  });
+  return entries;
+}
+
+async function loadSpecDocument(spec: SpecEntry): Promise<OpenAPIObject> {
+  const url = spec.source === 'user' ? spec.url : spec.jsonPath;
+  if (!url) {
+    throw new Error('Spec is missing a URL.');
+  }
+  const response = await fetch(url, { credentials: 'omit' });
+  if (!response.ok) {
+    throw new Error(`Failed to fetch spec (HTTP ${response.status})`);
+  }
+  const text = await response.text();
+  return parseSpecText(text, spec.format ?? inferFormatFromUrl(url) ?? 'auto');
+}
+
+function inferFormatFromUrl(url: string): 'json' | 'yaml' | null {
+  const lower = url.toLowerCase().split('?')[0] ?? '';
+  if (lower.endsWith('.yaml') || lower.endsWith('.yml')) return 'yaml';
+  if (lower.endsWith('.json')) return 'json';
+  return null;
+}
+
+function parseSpecText(text: string, format: 'auto' | 'json' | 'yaml'): OpenAPIObject {
+  if (format === 'json') {
+    return JSON.parse(text) as OpenAPIObject;
+  }
+  if (format === 'yaml') {
+    return yaml.load(text) as OpenAPIObject;
+  }
+  const trimmed = text.trimStart();
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    try {
+      return JSON.parse(text) as OpenAPIObject;
+    } catch {
+      // fall through to YAML
+    }
+  }
+  return yaml.load(text) as OpenAPIObject;
+}
+
+function SpecSwitcher({
+  specs,
+  activeSpecId,
+  onSwitch,
+  onManage,
+}: {
+  specs: SpecEntry[];
+  activeSpecId: string | null;
+  onSwitch: (id: string) => void;
+  onManage: () => void;
+}) {
+  if (!specs.length) {
+    return (
+      <button type="button" className="bov-button bov-button-quiet" onClick={onManage}>
+        Add a spec
+      </button>
+    );
+  }
+  return (
+    <div className="bov-select-wrap bov-spec-switcher">
+      <select
+        value={activeSpecId ?? ''}
+        aria-label="Active OpenAPI spec"
+        onChange={(event) => {
+          const value = event.currentTarget.value;
+          if (value === '__manage__') {
+            onManage();
+            return;
+          }
+          if (value) onSwitch(value);
+        }}
+      >
+        {specs.map((spec) => (
+          <option key={spec.id} value={spec.id}>
+            {spec.name}
+            {spec.source === 'host' ? ' (host)' : ''}
+          </option>
+        ))}
+        <option disabled>──────────</option>
+        <option value="__manage__">Manage specs…</option>
+      </select>
+    </div>
+  );
+}
+
+function SpecsTab({
+  specs,
+  activeSpecId,
+  onSwitchSpec,
+  userSpecs,
+  onAddUserSpec,
+  onUpdateUserSpec,
+  onRemoveUserSpec,
+}: {
+  specs: SpecEntry[];
+  activeSpecId: string | null;
+  onSwitchSpec: (id: string) => void;
+  userSpecs: UserSpec[];
+  onAddUserSpec: (spec: Omit<UserSpec, 'id' | 'addedAt'>) => UserSpec;
+  onUpdateUserSpec: (spec: UserSpec) => void;
+  onRemoveUserSpec: (id: string) => void;
+}) {
+  const [draftName, setDraftName] = useState('');
+  const [draftUrl, setDraftUrl] = useState('');
+  const [draftFormat, setDraftFormat] = useState<'auto' | 'json' | 'yaml'>('auto');
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  const userSpecLookup = useMemo(() => new Map(userSpecs.map((spec) => [spec.id, spec])), [userSpecs]);
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    const url = draftUrl.trim();
+    if (!url) {
+      setSubmitError('URL is required.');
+      return;
+    }
+    try {
+      // eslint-disable-next-line no-new
+      new URL(url, typeof window === 'undefined' ? 'http://localhost' : window.location.href);
+    } catch {
+      setSubmitError('That does not look like a valid URL.');
+      return;
+    }
+    setSubmitError(null);
+    onAddUserSpec({
+      name: draftName.trim() || guessNameFromUrl(url),
+      url,
+      format: draftFormat,
+    });
+    setDraftName('');
+    setDraftUrl('');
+    setDraftFormat('auto');
+  };
+
+  return (
+    <div className="bov-settings-section bov-specs-tab">
+      <form className="bov-pref-group bov-spec-add-form" onSubmit={submit}>
+        <legend>Add a spec</legend>
+        <p className="bov-pref-help">
+          Point the viewer at any reachable OpenAPI <code>.json</code> or <code>.yaml</code> URL. The browser fetches it
+          directly, so the host must allow CORS from this origin.
+        </p>
+        <label className="bov-server-form-row">
+          <span>Name</span>
+          <input
+            value={draftName}
+            onChange={(event) => setDraftName(event.currentTarget.value)}
+            placeholder="My API"
+          />
+        </label>
+        <label className="bov-server-form-row">
+          <span>URL</span>
+          <input
+            value={draftUrl}
+            onChange={(event) => setDraftUrl(event.currentTarget.value)}
+            placeholder="https://api.example.com/openapi.json"
+            required
+          />
+        </label>
+        <label className="bov-server-form-row">
+          <span>Format</span>
+          <select value={draftFormat} onChange={(event) => setDraftFormat(event.currentTarget.value as typeof draftFormat)}>
+            <option value="auto">Auto-detect</option>
+            <option value="json">JSON</option>
+            <option value="yaml">YAML</option>
+          </select>
+        </label>
+        {submitError ? <p className="bov-error">{submitError}</p> : null}
+        <button type="submit" className="bov-button bov-button-primary">
+          Add spec
+        </button>
+      </form>
+
+      <div className="bov-pref-group">
+        <legend>All specs</legend>
+        <ul className="bov-specs-list" role="list">
+          {specs.length === 0 ? <li className="bov-muted">No specs configured yet.</li> : null}
+          {specs.map((spec) => {
+            const userSpec = spec.source === 'user' ? userSpecLookup.get(spec.id) : null;
+            const isActive = spec.id === activeSpecId;
+            return (
+              <li key={spec.id} className="bov-specs-list-item">
+                <div className="bov-specs-list-item-main">
+                  <strong>{spec.name}</strong>
+                  <code>{spec.source === 'host' ? spec.jsonPath : spec.url}</code>
+                </div>
+                <div className="bov-specs-list-item-meta">
+                  {isActive ? <span className="bov-pill bov-pill-active">Active</span> : null}
+                  {spec.source === 'host' ? (
+                    <span className="bov-pill" title="Provided by the hosting application; cannot be removed here.">
+                      From host
+                    </span>
+                  ) : (
+                    <span className="bov-faint-text">User</span>
+                  )}
+                </div>
+                <div className="bov-specs-list-item-actions">
+                  {!isActive ? (
+                    <button type="button" className="bov-button bov-button-quiet" onClick={() => onSwitchSpec(spec.id)}>
+                      Open
+                    </button>
+                  ) : null}
+                  {userSpec ? (
+                    <UserSpecEditor
+                      spec={userSpec}
+                      onUpdate={onUpdateUserSpec}
+                      onRemove={() => onRemoveUserSpec(spec.id)}
+                    />
+                  ) : null}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+function UserSpecEditor({
+  spec,
+  onUpdate,
+  onRemove,
+}: {
+  spec: UserSpec;
+  onUpdate: (spec: UserSpec) => void;
+  onRemove: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(spec.name);
+  const [url, setUrl] = useState(spec.url);
+  const [format, setFormat] = useState<UserSpec['format']>(spec.format);
+
+  if (!editing) {
+    return (
+      <>
+        <button type="button" className="bov-button bov-button-quiet" onClick={() => setEditing(true)}>
+          Edit
+        </button>
+        <button type="button" className="bov-button bov-button-quiet" onClick={onRemove}>
+          Remove
+        </button>
+      </>
+    );
+  }
+
+  return (
+    <div className="bov-user-spec-editor">
+      <label>
+        <span>Name</span>
+        <input value={name} onChange={(event) => setName(event.currentTarget.value)} />
+      </label>
+      <label>
+        <span>URL</span>
+        <input value={url} onChange={(event) => setUrl(event.currentTarget.value)} />
+      </label>
+      <label>
+        <span>Format</span>
+        <select value={format} onChange={(event) => setFormat(event.currentTarget.value as UserSpec['format'])}>
+          <option value="auto">Auto-detect</option>
+          <option value="json">JSON</option>
+          <option value="yaml">YAML</option>
+        </select>
+      </label>
+      <div className="bov-user-spec-editor-actions">
+        <button
+          type="button"
+          className="bov-button bov-button-primary"
+          onClick={() => {
+            onUpdate({ ...spec, name: name.trim() || spec.name, url: url.trim() || spec.url, format });
+            setEditing(false);
+          }}
+        >
+          Save
+        </button>
+        <button
+          type="button"
+          className="bov-button bov-button-quiet"
+          onClick={() => {
+            setName(spec.name);
+            setUrl(spec.url);
+            setFormat(spec.format);
+            setEditing(false);
+          }}
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function guessNameFromUrl(url: string): string {
+  try {
+    const parsed = new URL(url, typeof window === 'undefined' ? 'http://localhost' : window.location.href);
+    return parsed.hostname || 'API';
+  } catch {
+    return 'API';
+  }
+}
+
+// ---------- Export / import ----------
+
+export type ExportedSettings = {
+  version: 1;
+  exportedAt: string;
+  preferences?: Preferences;
+  userSpecs: UserSpec[];
+  serversBySpec?: Record<string, SavedServersState>;
+  cookiesBySpec?: Record<string, Record<string, SavedCookie[]>>;
+  authBySpec?: Record<string, TryItOutAuthCredentials>;
+  hostSpecHints?: Array<{ id: string; name: string }>;
+};
+
+const STORAGE_KEY_PREFIXES = {
+  servers: 'better-openapi-viewer:servers:',
+  cookies: 'better-openapi-viewer:cookies:',
+  auth: 'better-openapi-viewer:auth:',
+};
+
+function buildExport(options: {
+  includeCredentials: boolean;
+  hostSpecs: SpecEntry[];
+  userSpecs: UserSpec[];
+}): ExportedSettings {
+  const payload: ExportedSettings = {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    userSpecs: options.userSpecs,
+    hostSpecHints: options.hostSpecs.map((spec) => ({ id: spec.id, name: spec.name })),
+  };
+
+  if (typeof window !== 'undefined') {
+    try {
+      const prefsRaw = window.localStorage.getItem(PREFS_STORAGE_KEY);
+      if (prefsRaw) payload.preferences = JSON.parse(prefsRaw) as Preferences;
+    } catch {
+      // ignore
+    }
+
+    const serversBySpec: Record<string, SavedServersState> = {};
+    const cookiesBySpec: Record<string, Record<string, SavedCookie[]>> = {};
+    const authBySpec: Record<string, TryItOutAuthCredentials> = {};
+
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const key = window.localStorage.key(i);
+      if (!key) continue;
+      try {
+        if (key.startsWith(STORAGE_KEY_PREFIXES.servers)) {
+          const specKey = key.slice(STORAGE_KEY_PREFIXES.servers.length);
+          const value = window.localStorage.getItem(key);
+          if (!value) continue;
+          const parsed = JSON.parse(value) as SavedServersState;
+          if (!options.includeCredentials) {
+            parsed.servers = parsed.servers.map((server) => ({ ...server, credentials: {} }));
+          }
+          serversBySpec[specKey] = parsed;
+        } else if (key.startsWith(STORAGE_KEY_PREFIXES.cookies)) {
+          if (!options.includeCredentials) continue;
+          const rest = key.slice(STORAGE_KEY_PREFIXES.cookies.length);
+          const lastColon = rest.lastIndexOf(':');
+          if (lastColon === -1) continue;
+          const specKey = rest.slice(0, lastColon);
+          const serverId = rest.slice(lastColon + 1);
+          const value = window.localStorage.getItem(key);
+          if (!value) continue;
+          const cookies = JSON.parse(value) as SavedCookie[];
+          if (!cookiesBySpec[specKey]) cookiesBySpec[specKey] = {};
+          cookiesBySpec[specKey][serverId] = cookies;
+        } else if (key.startsWith(STORAGE_KEY_PREFIXES.auth)) {
+          if (!options.includeCredentials) continue;
+          const specKey = key.slice(STORAGE_KEY_PREFIXES.auth.length);
+          const value = window.localStorage.getItem(key);
+          if (!value) continue;
+          authBySpec[specKey] = JSON.parse(value) as TryItOutAuthCredentials;
+        }
+      } catch {
+        // skip malformed entries
+      }
+    }
+
+    payload.serversBySpec = serversBySpec;
+    if (options.includeCredentials) {
+      payload.cookiesBySpec = cookiesBySpec;
+      payload.authBySpec = authBySpec;
+    }
+  }
+
+  return payload;
+}
+
+function applyImportedSettings(payload: ExportedSettings, mode: 'merge' | 'replace', userSpecsApi: UserSpecsApi) {
+  if (typeof window !== 'undefined') {
+    if (mode === 'replace') {
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < window.localStorage.length; i++) {
+        const key = window.localStorage.key(i);
+        if (!key) continue;
+        if (
+          key === USER_SPECS_STORAGE_KEY ||
+          key === LAST_SPEC_STORAGE_KEY ||
+          key === PREFS_STORAGE_KEY ||
+          key.startsWith(STORAGE_KEY_PREFIXES.servers) ||
+          key.startsWith(STORAGE_KEY_PREFIXES.cookies) ||
+          key.startsWith(STORAGE_KEY_PREFIXES.auth)
+        ) {
+          keysToRemove.push(key);
+        }
+      }
+      keysToRemove.forEach((key) => window.localStorage.removeItem(key));
+    }
+
+    if (payload.preferences) {
+      const merged = mode === 'replace'
+        ? payload.preferences
+        : { ...readPersistedPreferences(), ...payload.preferences };
+      try {
+        window.localStorage.setItem(PREFS_STORAGE_KEY, JSON.stringify(merged));
+      } catch {
+        // ignore
+      }
+    }
+
+    Object.entries(payload.serversBySpec ?? {}).forEach(([specKey, state]) => {
+      try {
+        window.localStorage.setItem(`${STORAGE_KEY_PREFIXES.servers}${specKey}`, JSON.stringify(state));
+      } catch {
+        // ignore
+      }
+    });
+
+    Object.entries(payload.cookiesBySpec ?? {}).forEach(([specKey, byServer]) => {
+      Object.entries(byServer).forEach(([serverId, cookies]) => {
+        try {
+          window.localStorage.setItem(
+            `${STORAGE_KEY_PREFIXES.cookies}${specKey}:${serverId}`,
+            JSON.stringify(cookies),
+          );
+        } catch {
+          // ignore
+        }
+      });
+    });
+
+    Object.entries(payload.authBySpec ?? {}).forEach(([specKey, credentials]) => {
+      try {
+        window.localStorage.setItem(`${STORAGE_KEY_PREFIXES.auth}${specKey}`, JSON.stringify(credentials));
+      } catch {
+        // ignore
+      }
+    });
+  }
+
+  if (mode === 'replace') {
+    userSpecsApi.replaceAll(payload.userSpecs);
+  } else {
+    const existing = readUserSpecs();
+    const existingIds = new Set(existing.map((spec) => spec.id));
+    const merged = [
+      ...existing,
+      ...payload.userSpecs.filter((spec) => !existingIds.has(spec.id)),
+    ];
+    userSpecsApi.replaceAll(merged);
+  }
+}
+
+function DataTab({
+  userSpecs,
+  hostSpecs,
+  onImport,
+}: {
+  userSpecs: UserSpec[];
+  hostSpecs: SpecEntry[];
+  onImport: (payload: ExportedSettings, mode: 'merge' | 'replace') => void;
+}) {
+  const [includeCredentials, setIncludeCredentials] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importStatus, setImportStatus] = useState<string | null>(null);
+  const [importMode, setImportMode] = useState<'merge' | 'replace'>('merge');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const onExport = () => {
+    const payload = buildExport({ includeCredentials, hostSpecs, userSpecs });
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = window.document.createElement('a');
+    link.href = url;
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    link.download = `better-openapi-viewer-settings-${stamp}.json`;
+    window.document.body.appendChild(link);
+    link.click();
+    window.document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const onPickFile = () => {
+    fileInputRef.current?.click();
+  };
+
+  const onFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.currentTarget.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text) as ExportedSettings;
+      if (!parsed || typeof parsed !== 'object' || parsed.version !== 1 || !Array.isArray(parsed.userSpecs)) {
+        throw new Error('File does not look like an exported settings file (version 1).');
+      }
+      const confirmed = window.confirm(
+        importMode === 'replace'
+          ? 'Replace all existing settings and reload? Current data will be lost.'
+          : 'Merge imported settings into existing data and reload?',
+      );
+      if (!confirmed) return;
+      setImportError(null);
+      setImportStatus('Imported. Reloading…');
+      onImport(parsed, importMode);
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : 'Failed to import settings.');
+    } finally {
+      event.target.value = '';
+    }
+  };
+
+  return (
+    <div className="bov-settings-section bov-data-tab">
+      <fieldset className="bov-pref-group">
+        <legend>Export</legend>
+        <p className="bov-pref-help">
+          Download a JSON file containing your preferences, user-added specs, saved servers, and cookies. Built-in
+          (host-provided) specs are not included; only a hint of their IDs/names is recorded.
+        </p>
+        <label className="bov-checkbox-row">
+          <input
+            type="checkbox"
+            checked={includeCredentials}
+            onChange={(event) => setIncludeCredentials(event.currentTarget.checked)}
+          />
+          <span>
+            Include credentials (bearer tokens, API keys, cookies). <strong>Off by default</strong> — turn on only if
+            you trust where this file is going.
+          </span>
+        </label>
+        <button type="button" className="bov-button bov-button-primary" onClick={onExport}>
+          Download settings JSON
+        </button>
+      </fieldset>
+
+      <fieldset className="bov-pref-group">
+        <legend>Import</legend>
+        <p className="bov-pref-help">
+          Load a previously exported settings file. The page reloads after import.
+        </p>
+        <div className="bov-segmented">
+          <label>
+            <input
+              type="radio"
+              name="bov-import-mode"
+              checked={importMode === 'merge'}
+              onChange={() => setImportMode('merge')}
+            />
+            <span>Merge into existing</span>
+          </label>
+          <label>
+            <input
+              type="radio"
+              name="bov-import-mode"
+              checked={importMode === 'replace'}
+              onChange={() => setImportMode('replace')}
+            />
+            <span>Replace existing</span>
+          </label>
+        </div>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="application/json,.json"
+          style={{ display: 'none' }}
+          onChange={onFileChange}
+        />
+        <button type="button" className="bov-button" onClick={onPickFile}>
+          Choose file…
+        </button>
+        {importError ? <p className="bov-error">{importError}</p> : null}
+        {importStatus ? <p className="bov-muted">{importStatus}</p> : null}
+      </fieldset>
+    </div>
+  );
+}
+
+// ---------- Empty / loading states ----------
+
+function NoSpecLoadedState({
+  onAddSpec,
+  onOpenSettings,
+  specSwitcher,
+}: {
+  onAddSpec: (spec: Omit<UserSpec, 'id' | 'addedAt'>) => UserSpec;
+  onOpenSettings: (tab?: SettingsTab) => void;
+  specSwitcher: ReactNode;
+}) {
+  const [name, setName] = useState('');
+  const [url, setUrl] = useState('');
+  const [format, setFormat] = useState<'auto' | 'json' | 'yaml'>('auto');
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    const trimmed = url.trim();
+    if (!trimmed) {
+      setError('Enter a URL.');
+      return;
+    }
+    try {
+      // eslint-disable-next-line no-new
+      new URL(trimmed, typeof window === 'undefined' ? 'http://localhost' : window.location.href);
+    } catch {
+      setError('Invalid URL.');
+      return;
+    }
+    setError(null);
+    onAddSpec({ name: name.trim() || guessNameFromUrl(trimmed), url: trimmed, format });
+  };
+
+  return (
+    <section className="bov-empty-state" aria-label="No spec loaded">
+      <div className="bov-empty-state-card">
+        <p className="bov-kicker">Better OpenAPI Viewer</p>
+        <h1>Load an OpenAPI spec</h1>
+        <p className="bov-muted">
+          Paste a URL pointing at an OpenAPI <code>.json</code> or <code>.yaml</code> document. The viewer fetches it
+          directly from your browser, so the host needs to allow CORS from this origin.
+        </p>
+        <form className="bov-empty-state-form" onSubmit={submit}>
+          <label>
+            <span>Spec URL</span>
+            <input
+              value={url}
+              onChange={(event) => setUrl(event.currentTarget.value)}
+              placeholder="https://api.example.com/openapi.json"
+              required
+            />
+          </label>
+          <label>
+            <span>Display name (optional)</span>
+            <input value={name} onChange={(event) => setName(event.currentTarget.value)} placeholder="My API" />
+          </label>
+          <label>
+            <span>Format</span>
+            <select value={format} onChange={(event) => setFormat(event.currentTarget.value as typeof format)}>
+              <option value="auto">Auto-detect</option>
+              <option value="json">JSON</option>
+              <option value="yaml">YAML</option>
+            </select>
+          </label>
+          {error ? <p className="bov-error">{error}</p> : null}
+          <div className="bov-empty-state-actions">
+            <button type="submit" className="bov-button bov-button-primary">
+              Load spec
+            </button>
+            <button type="button" className="bov-button bov-button-quiet" onClick={() => onOpenSettings('data')}>
+              Import settings…
+            </button>
+          </div>
+        </form>
+        <div className="bov-empty-state-switcher">{specSwitcher}</div>
+      </div>
+    </section>
+  );
+}
+
+function SpecLoadingState({
+  spec,
+  loading,
+  error,
+  onRetry,
+  onOpenSettings,
+  specSwitcher,
+}: {
+  spec: SpecEntry;
+  loading: boolean;
+  error: string | null;
+  onRetry: () => void;
+  onOpenSettings: (tab?: SettingsTab) => void;
+  specSwitcher: ReactNode;
+}) {
+  return (
+    <section className="bov-loading" aria-label="Loading API documentation">
+      <div className="bov-empty-state-switcher">{specSwitcher}</div>
+      <p className="bov-kicker">{spec.source === 'host' ? 'OpenAPI document' : 'Fetching spec'}</p>
+      <h1>{spec.name}</h1>
+      <p className="bov-muted">
+        <code>{spec.source === 'host' ? spec.jsonPath : spec.url}</code>
+      </p>
+      {error ? (
+        <>
+          <p className="bov-error" role="alert">
+            {error}
+          </p>
+          <p className="bov-muted">
+            Most failures are CORS-related. Make sure the host sends <code>Access-Control-Allow-Origin</code> for this
+            origin.
+          </p>
+          <div className="bov-empty-state-actions">
+            <button type="button" className="bov-button bov-button-primary" onClick={onRetry}>
+              Retry
+            </button>
+            <button type="button" className="bov-button bov-button-quiet" onClick={() => onOpenSettings('specs')}>
+              Manage specs
+            </button>
+          </div>
+        </>
+      ) : loading ? (
+        <>
+          <p className="bov-muted" role="status">
+            Loading…
+          </p>
+          <div className="bov-skeleton-stack" aria-hidden="true">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+        </>
+      ) : null}
+    </section>
+  );
 }

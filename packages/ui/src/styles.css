@@ -356,7 +356,7 @@
   }
 
   .bov-row-trigger {
-    @apply grid w-full grid-cols-[60px_minmax(0,auto)_minmax(0,1fr)_auto_auto] items-center gap-3 bg-transparent px-5 py-2 text-left transition-colors;
+    @apply grid w-full grid-cols-[60px_minmax(0,auto)_minmax(0,1fr)_auto] items-center gap-3 bg-transparent px-5 py-2 text-left transition-colors;
     border: 0;
     border-left: 2px solid transparent;
     color: var(--bov-text);
@@ -382,6 +382,10 @@
   .bov-row-summary {
     @apply truncate text-[12px];
     color: var(--bov-muted);
+  }
+
+  .bov-row-end {
+    @apply flex items-center gap-2;
   }
 
   .bov-row-arrow {
@@ -410,6 +414,12 @@
     border-color: color-mix(in srgb, var(--bov-warn) 30%, transparent);
     background: var(--bov-warn-soft);
     color: var(--bov-warn);
+  }
+
+  .bov-pill-auth {
+    border-color: color-mix(in srgb, #6366f1 40%, transparent);
+    background: color-mix(in srgb, #6366f1 10%, transparent);
+    color: #6366f1;
   }
 
   /* === RIGHT PANE: DETAILS === */
@@ -515,7 +525,7 @@
   }
 
   .bov-detail-stack {
-    @apply grid gap-5;
+    @apply grid gap-6;
   }
 
   .bov-detail-stack > section,
@@ -523,10 +533,15 @@
     @apply grid gap-2;
   }
 
+  .bov-detail-stack > section + section {
+    @apply pt-6;
+    border-top: 1px solid var(--bov-line);
+  }
+
   .bov-detail-stack h4 {
-    @apply m-0 text-[10px] font-semibold uppercase;
+    @apply m-0 mb-1 text-[11px] font-semibold uppercase;
     letter-spacing: 0.14em;
-    color: var(--bov-faint);
+    color: var(--bov-text);
   }
 
   .bov-detail-stack h5 {
@@ -605,7 +620,7 @@
     color: var(--bov-faint);
   }
 
-  .bov-detail-stack section > article {
+  .bov-detail-stack section article {
     @apply rounded-[6px] border p-3;
     border-color: var(--bov-line);
     background: var(--bov-surface);
@@ -676,6 +691,28 @@
     border-color: transparent;
     background: transparent;
     color: var(--bov-muted);
+  }
+
+  .bov-button-danger {
+    border-color: #b91c1c;
+    background: #b91c1c;
+    color: #ffffff;
+  }
+
+  .bov-button-danger:hover {
+    background: #991b1b;
+    border-color: #991b1b;
+  }
+
+  .bov[data-theme='dark'] .bov-button-danger {
+    border-color: #ef4444;
+    background: #ef4444;
+    color: #ffffff;
+  }
+
+  .bov[data-theme='dark'] .bov-button-danger:hover {
+    background: #dc2626;
+    border-color: #dc2626;
   }
 
   .bov-copy-button {
@@ -951,8 +988,16 @@
     position: relative;
   }
 
+  .bov-product-toolbar {
+    @apply mb-3 flex items-center gap-2;
+  }
+
+  .bov-product-toolbar-switcher {
+    @apply min-w-0 flex-1;
+  }
+
   .bov-product-gear {
-    @apply absolute right-0 top-0 inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-[6px] border bg-transparent transition-colors;
+    @apply inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-[6px] border bg-transparent transition-colors;
     border-color: transparent;
     color: var(--bov-faint);
   }
@@ -1377,6 +1422,15 @@
     @apply flex items-center gap-2;
   }
 
+  .bov-server-form-footer {
+    @apply mt-2 flex flex-wrap items-center justify-between gap-2 pt-3;
+    border-top: 1px solid var(--bov-line);
+  }
+
+  .bov-server-form-footer .bov-button-danger {
+    @apply ml-auto;
+  }
+
   .bov-server-form-row {
     @apply grid items-center gap-2 text-[12px];
     grid-template-columns: 120px 1fr;
@@ -1457,5 +1511,128 @@
   .bov-active-cookies-value {
     @apply min-w-0 flex-1 truncate font-mono text-[11px];
     color: var(--bov-muted);
+  }
+
+  /* === SPEC SWITCHER & EMPTY STATE === */
+  .bov-spec-switcher select {
+    @apply w-full rounded-[6px] border bg-transparent py-1.5 text-[12px];
+    border-color: var(--bov-line);
+    color: var(--bov-text);
+    font-family: inherit;
+    padding-left: 10px;
+    padding-right: 28px;
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+  }
+
+  .bov-empty-state {
+    @apply flex h-full w-full items-center justify-center px-4 py-10;
+  }
+
+  .bov-empty-state-card {
+    @apply grid w-full max-w-xl gap-4 rounded-[10px] border p-6;
+    border-color: var(--bov-line);
+    background: var(--bov-surface);
+  }
+
+  .bov-empty-state-card h1 {
+    @apply m-0 text-[22px] font-semibold;
+  }
+
+  .bov-empty-state-form {
+    @apply grid gap-3;
+  }
+
+  .bov-empty-state-form label {
+    @apply grid gap-1 text-[12px];
+  }
+
+  .bov-empty-state-form input,
+  .bov-empty-state-form select {
+    @apply w-full rounded-[6px] border bg-transparent px-2.5 py-1.5 text-[12px];
+    border-color: var(--bov-line);
+    color: var(--bov-text);
+  }
+
+  .bov-empty-state-actions {
+    @apply flex flex-wrap gap-2;
+  }
+
+  .bov-empty-state-switcher {
+    @apply mt-2;
+  }
+
+  /* === SPECS TAB & DATA TAB === */
+  .bov-specs-tab {
+    @apply grid gap-5;
+  }
+
+  .bov-spec-add-form {
+    @apply grid gap-3;
+  }
+
+  .bov-specs-list {
+    @apply m-0 grid list-none gap-2 p-0;
+  }
+
+  .bov-specs-list-item {
+    @apply grid gap-2 rounded-[6px] border p-3;
+    border-color: var(--bov-line);
+    background: var(--bov-surface);
+  }
+
+  .bov-specs-list-item-main {
+    @apply grid gap-1;
+  }
+
+  .bov-specs-list-item-main code {
+    @apply font-mono text-[11px];
+    color: var(--bov-muted);
+    word-break: break-all;
+  }
+
+  .bov-specs-list-item-meta {
+    @apply flex flex-wrap items-center gap-1.5;
+  }
+
+  .bov-specs-list-item-actions {
+    @apply flex flex-wrap items-center gap-2;
+  }
+
+  .bov-user-spec-editor {
+    @apply grid w-full gap-2;
+  }
+
+  .bov-user-spec-editor label {
+    @apply grid gap-1 text-[11px];
+  }
+
+  .bov-user-spec-editor input,
+  .bov-user-spec-editor select {
+    @apply w-full rounded-[6px] border bg-transparent px-2.5 py-1.5 text-[12px];
+    border-color: var(--bov-line);
+    color: var(--bov-text);
+  }
+
+  .bov-user-spec-editor-actions {
+    @apply flex gap-2;
+  }
+
+  .bov-data-tab {
+    @apply grid gap-5;
+  }
+
+  .bov-checkbox-row {
+    @apply flex items-start gap-2 text-[12px];
+  }
+
+  .bov-error {
+    @apply m-0 text-[12px];
+    color: #b91c1c;
+  }
+
+  .bov[data-theme='dark'] .bov-error {
+    color: #fca5a5;
   }
 }
