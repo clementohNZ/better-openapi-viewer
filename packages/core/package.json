@@ -18,6 +18,10 @@
     "README.md",
     "LICENSE"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/clementohNZ/better-openapi-viewer"
+  },
   "publishConfig": {
     "access": "public"
   },
