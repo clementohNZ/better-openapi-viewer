@@ -6,7 +6,7 @@
     "build": "turbo run build",
     "dev": "turbo run dev --parallel --filter=!example-core",
     "lint": "turbo run lint",
-    "pack:check": "pnpm run build && pnpm --filter @clementoh/better-openapi-viewer-core --filter @clementoh/better-openapi-viewer-ui --filter @clementoh/better-openapi-viewer-nestjs pack --dry-run",
+    "pack:check": "pnpm run build && cd packages/core && npm pack --dry-run && cd ../ui && npm pack --dry-run && cd ../nestjs && npm pack --dry-run",
     "typecheck": "turbo run typecheck",
     "format": "prettier --write \"**/*.{ts,tsx,js,json,md,css}\""
   },
