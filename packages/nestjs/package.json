@@ -1,5 +1,5 @@
 {
-  "name": "@better-openapi-viewer/nestjs",
+  "name": "@clem/nestjs",
   "version": "0.1.0",
   "description": "NestJS adapter for Better OpenAPI Viewer.",
   "type": "module",
@@ -28,8 +28,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@better-openapi-viewer/core": "0.1.0",
-    "@better-openapi-viewer/ui": "0.1.0",
+    "@clem/core": "0.1.0",
+    "@clem/ui": "0.1.0",
     "@nestjs/swagger": "^11.4.2"
   },
   "peerDependencies": {

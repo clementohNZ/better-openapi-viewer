@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import type { INestApplication } from '@nestjs/common';
-import type { OpenAPIObject } from '@better-openapi-viewer/core';
+import type { OpenAPIObject } from '@clem/core';
 
 const require = createRequire(import.meta.url);
 
@@ -56,11 +56,11 @@ export function setupBetterOpenApiViewer(app: INestApplication, options: BetterO
   }
 
   registerGet(app, bundledViewerAssetPath, async (_request, response) => {
-    sendJavaScript(response, await readFile(require.resolve('@better-openapi-viewer/ui/browser'), 'utf8'));
+    sendJavaScript(response, await readFile(require.resolve('@clem/ui/browser'), 'utf8'));
   });
 
   registerGet(app, bundledViewerStylePath, async (_request, response) => {
-    sendCss(response, await readFile(require.resolve('@better-openapi-viewer/ui/browser-style'), 'utf8'));
+    sendCss(response, await readFile(require.resolve('@clem/ui/browser-style'), 'utf8'));
   });
 
   specs.forEach((spec) => {

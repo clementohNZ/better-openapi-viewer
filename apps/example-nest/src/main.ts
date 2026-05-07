@@ -2,7 +2,7 @@ import 'reflect-metadata';
 
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import { setupBetterOpenApiViewer } from '@better-openapi-viewer/nestjs';
+import { setupBetterOpenApiViewer } from '@clem/nestjs';
 import { AppModule } from './app.module.js';
 
 async function bootstrap() {

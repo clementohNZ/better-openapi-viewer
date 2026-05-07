@@ -1,5 +1,5 @@
 {
-  "name": "@better-openapi-viewer/core",
+  "name": "@clem/core",
   "version": "0.1.0",
   "description": "Framework-agnostic OpenAPI normalization and viewer primitives.",
   "type": "module",
