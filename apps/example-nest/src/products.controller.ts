@@ -6,6 +6,7 @@ import {
   ApiHeader,
   ApiNoContentResponse,
   ApiOkResponse,
+  ApiOperation,
   ApiQuery,
   ApiSecurity,
   ApiTags,
@@ -15,6 +16,7 @@ import {
 @Controller('products')
 export class ProductsController {
   @Get()
+  @ApiOperation({ summary: 'List products' })
   @ApiQuery({ name: 'category', required: false })
   @ApiQuery({ name: 'minPrice', required: false, schema: { type: 'number' } })
   @ApiQuery({ name: 'maxPrice', required: false, schema: { type: 'number' } })
@@ -106,6 +108,7 @@ export class ProductsController {
   }
 
   @Get('featured')
+  @ApiOperation({ summary: 'Get featured products' })
   @ApiQuery({ name: 'limit', required: false, schema: { type: 'integer', default: 10 } })
   @ApiHeader({ name: 'x-store-id', required: true })
   @ApiOkResponse({ description: 'Featured products.' })
@@ -210,6 +213,7 @@ export class ProductsController {
   }
 
   @Get(':id/variants')
+  @ApiOperation({ summary: 'List product variants' })
   @ApiOkResponse({
     description: 'Product variants.',
     schema: {
@@ -285,6 +289,7 @@ export class ProductsController {
   }
 
   @Put(':id/inventory')
+  @ApiOperation({ summary: 'Update product inventory' })
   @ApiBearerAuth()
   @ApiBody({
     schema: {

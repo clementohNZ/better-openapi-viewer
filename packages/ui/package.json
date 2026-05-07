@@ -38,13 +38,15 @@
     "@codemirror/language": "^6.12.3",
     "@codemirror/lint": "^6.9.6",
     "@codemirror/state": "^6.6.0",
-    "@codemirror/view": "^6.42.0"
+    "@codemirror/view": "^6.42.0",
+    "js-yaml": "^4.1.0"
   },
   "peerDependencies": {
     "react": "^19.2.6",
     "react-dom": "^19.2.6"
   },
   "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "tailwindcss": "^3.4.19"

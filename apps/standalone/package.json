@@ -1,0 +1,21 @@
+{
+  "name": "standalone",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "node scripts/build.mjs --serve",
+    "preview": "node scripts/build.mjs --serve",
+    "lint": "echo 'no lint'",
+    "typecheck": "echo 'no typecheck'"
+  },
+  "dependencies": {
+    "@clem/better-openapi-viewer-ui": "*",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6"
+  },
+  "devDependencies": {
+    "webpack": "^5.0.0"
+  }
+}

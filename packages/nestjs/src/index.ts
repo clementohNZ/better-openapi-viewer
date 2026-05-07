@@ -189,8 +189,10 @@ function renderViewerHtmlForSpec(
 ) {
   return renderViewerHtml({
     jsonPath: `/${spec.jsonPath}`,
+    activeSpecId: spec.uiPath,
     title: spec.title ?? options.title ?? document.info?.title ?? spec.name,
     specs: specs.map((item) => ({
+      id: item.uiPath,
       name: item.name,
       path: `/${item.uiPath}`,
       jsonPath: `/${item.jsonPath}`,
@@ -229,6 +231,7 @@ function slugify(value: string) {
 
 function renderViewerHtml({
   jsonPath,
+  activeSpecId,
   title,
   specs,
   bundledViewerAssetPath,
@@ -241,8 +244,9 @@ function renderViewerHtml({
   config,
 }: {
   jsonPath: string;
+  activeSpecId: string;
   title: string;
-  specs: Array<{ name: string; path: string; jsonPath: string }>;
+  specs: Array<{ id: string; name: string; path: string; jsonPath: string }>;
   bundledViewerAssetPath: string;
   bundledViewerStylePath: string;
   customCss?: string;
@@ -259,14 +263,9 @@ function renderViewerHtml({
     persistAuthorization: boolean;
   };
 }) {
-  const serializedConfig = JSON.stringify({ jsonPath, specs, ...config }).replace(/</g, '\\u003c');
+  const serializedConfig = JSON.stringify({ jsonPath, activeSpecId, specs, ...config }).replace(/</g, '\\u003c');
   const escapedTitle = escapeHtml(title);
-  const specLinks =
-    specs.length > 1
-      ? `<nav aria-label="OpenAPI documents">${specs
-          .map((spec) => `<a href="${escapeAttribute(spec.path)}">${escapeHtml(spec.name)}</a>`)
-          .join('')}</nav>`
-      : '';
+  const specLinks = '';
   const cssLinks = asArray(customCssUrl)
     .map((url) => `<link rel="stylesheet" href="${escapeAttribute(url)}" />`)
     .join('\n    ');

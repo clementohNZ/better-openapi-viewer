@@ -5,6 +5,7 @@ import {
   ApiHeader,
   ApiNoContentResponse,
   ApiOkResponse,
+  ApiOperation,
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
@@ -13,6 +14,7 @@ import {
 @Controller('search')
 export class SearchController {
   @Get()
+  @ApiOperation({ summary: 'Search across resources' })
   @ApiQuery({ name: 'q', required: true, description: 'Search query.' })
   @ApiQuery({ name: 'types', required: false, description: 'Comma-separated resource types to search.', example: 'products,orders,users' })
   @ApiQuery({ name: 'page', required: false, schema: { type: 'integer', default: 1 } })

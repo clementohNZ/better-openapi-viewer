@@ -6,6 +6,7 @@ import {
   ApiHeader,
   ApiNoContentResponse,
   ApiOkResponse,
+  ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
 
@@ -13,6 +14,7 @@ import {
 @Controller('auth')
 export class AuthController {
   @Post('login')
+  @ApiOperation({ summary: 'Authenticate with email and password' })
   @ApiBody({
     schema: {
       type: 'object',
@@ -158,6 +160,7 @@ export class AuthController {
   }
 
   @Get('me')
+  @ApiOperation({ summary: 'Get current user profile' })
   @ApiBearerAuth()
   @ApiOkResponse({
     description: 'Current authenticated user.',
@@ -199,6 +202,7 @@ export class AuthController {
   }
 
   @Post('mfa/setup')
+  @ApiOperation({ summary: 'Set up multi-factor authentication' })
   @ApiBearerAuth()
   @ApiOkResponse({
     description: 'MFA setup initiated. Scan QR code with authenticator app.',

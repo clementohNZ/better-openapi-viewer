@@ -5,6 +5,7 @@ import {
   ApiCreatedResponse,
   ApiNoContentResponse,
   ApiOkResponse,
+  ApiOperation,
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
@@ -14,6 +15,7 @@ import {
 @Controller('notifications')
 export class NotificationsController {
   @Get()
+  @ApiOperation({ summary: 'List notifications' })
   @ApiQuery({ name: 'read', required: false, schema: { type: 'boolean' }, description: 'Filter by read status.' })
   @ApiQuery({ name: 'type', required: false, enum: ['order', 'system', 'marketing', 'security'] })
   @ApiQuery({ name: 'page', required: false, schema: { type: 'integer', default: 1 } })
@@ -96,6 +98,7 @@ export class NotificationsController {
   }
 
   @Get('preferences')
+  @ApiOperation({ summary: 'Get notification preferences' })
   @ApiOkResponse({
     description: 'Notification preferences.',
     schema: {

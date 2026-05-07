@@ -10,21 +10,58 @@ async function boot() {
     throw new Error('Better OpenAPI Viewer root element was not found.');
   }
 
-  const response = await fetch(config.jsonPath);
+  const hostSpecs = buildHostSpecs(config);
+  const initialSpecId = resolveInitialSpecId(config, hostSpecs);
+  let initialDocument;
 
-  if (!response.ok) {
-    throw new Error(`OpenAPI document request failed with HTTP ${response.status}`);
+  if (initialSpecId) {
+    const activeHostSpec = hostSpecs.find((spec) => spec.id === initialSpecId);
+    if (activeHostSpec) {
+      try {
+        const response = await fetch(activeHostSpec.jsonPath);
+        if (response.ok) {
+          initialDocument = await response.json();
+        }
+      } catch {
+        // fall through; the React app will show a load error.
+      }
+    }
   }
 
-  const document = await response.json();
   createRoot(target).render(
     React.createElement(BetterOpenApiViewer, {
-      document,
+      document: initialDocument,
       config,
       persistAuthorization: config.persistAuthorization,
       preauthorizedCredentials: config.preauthorizedCredentials,
+      hostSpecs,
+      initialSpecId,
     }),
   );
+}
+
+function buildHostSpecs(config) {
+  if (Array.isArray(config.specs) && config.specs.length > 0) {
+    return config.specs
+      .filter((spec) => spec && spec.jsonPath)
+      .map((spec, index) => ({
+        id: spec.id ?? spec.path ?? `host-${index}`,
+        name: spec.name ?? `Spec ${index + 1}`,
+        jsonPath: spec.jsonPath,
+        format: spec.format,
+      }));
+  }
+  if (config.jsonPath) {
+    return [{ id: 'host-0', name: 'OpenAPI', jsonPath: config.jsonPath }];
+  }
+  return [];
+}
+
+function resolveInitialSpecId(config, hostSpecs) {
+  if (config.activeSpecId && hostSpecs.some((spec) => spec.id === config.activeSpecId)) {
+    return config.activeSpecId;
+  }
+  return hostSpecs[0]?.id;
 }
 
 boot().catch((error) => {

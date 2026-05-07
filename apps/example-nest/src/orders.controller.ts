@@ -6,6 +6,7 @@ import {
   ApiHeader,
   ApiNoContentResponse,
   ApiOkResponse,
+  ApiOperation,
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
@@ -15,6 +16,7 @@ import {
 @Controller('orders')
 export class OrdersController {
   @Get()
+  @ApiOperation({ summary: 'List orders' })
   @ApiQuery({ name: 'status', required: false, enum: ['pending', 'processing', 'shipped', 'delivered', 'cancelled', 'refunded'] })
   @ApiQuery({ name: 'customerId', required: false })
   @ApiQuery({ name: 'from', required: false, schema: { type: 'string', format: 'date' } })
@@ -152,6 +154,7 @@ export class OrdersController {
   }
 
   @Get(':id')
+  @ApiOperation({ summary: 'Get order details' })
   @ApiOkResponse({ description: 'Order detail.' })
   getOrder(@Param('id') id: string) {
     return { id, status: 'pending' };
@@ -207,6 +210,7 @@ export class OrdersController {
   }
 
   @Get(':id/tracking')
+  @ApiOperation({ summary: 'Get shipment tracking' })
   @ApiOkResponse({
     description: 'Order tracking information.',
     schema: {

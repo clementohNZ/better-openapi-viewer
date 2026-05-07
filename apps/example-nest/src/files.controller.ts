@@ -7,6 +7,7 @@ import {
   ApiHeader,
   ApiNoContentResponse,
   ApiOkResponse,
+  ApiOperation,
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
@@ -16,6 +17,7 @@ import {
 @Controller('files')
 export class FilesController {
   @Post('upload')
+  @ApiOperation({ summary: 'Upload a file' })
   @ApiConsumes('multipart/form-data')
   @ApiHeader({ name: 'x-upload-checksum', required: false, description: 'SHA-256 hex digest of the file for integrity verification.' })
   @ApiBody({
@@ -56,6 +58,7 @@ export class FilesController {
   }
 
   @Get()
+  @ApiOperation({ summary: 'List uploaded files' })
   @ApiQuery({ name: 'folder', required: false })
   @ApiQuery({ name: 'contentType', required: false, description: 'Filter by MIME type prefix e.g. "image/".' })
   @ApiQuery({ name: 'page', required: false, schema: { type: 'integer', default: 1 } })

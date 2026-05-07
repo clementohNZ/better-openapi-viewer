@@ -6,6 +6,7 @@ import {
   ApiHeader,
   ApiNoContentResponse,
   ApiOkResponse,
+  ApiOperation,
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
@@ -15,6 +16,7 @@ import {
 @Controller('reports')
 export class ReportsController {
   @Get()
+  @ApiOperation({ summary: 'List generated reports' })
   @ApiQuery({ name: 'status', required: false, enum: ['pending', 'running', 'complete', 'failed'] })
   @ApiQuery({ name: 'page', required: false, schema: { type: 'integer', default: 1 } })
   @ApiOkResponse({
@@ -48,6 +50,7 @@ export class ReportsController {
   }
 
   @Post('generate')
+  @ApiOperation({ summary: 'Generate a new report' })
   @ApiHeader({ name: 'x-callback-url', required: false, description: 'Webhook URL to notify when report is ready.' })
   @ApiBody({
     schema: {

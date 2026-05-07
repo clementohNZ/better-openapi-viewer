@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Better OpenAPI Viewer</title>
+    <link rel="stylesheet" href="./viewer.css" />
+  </head>
+  <body>
+    <div data-better-openapi-viewer-root>
+      <main class="bov">
+        <section class="bov-loading" aria-label="Loading API documentation">
+          <p class="bov-kicker">Better OpenAPI Viewer</p>
+          <h1>Standalone</h1>
+          <p class="bov-muted" role="status">Loading…</p>
+        </section>
+      </main>
+    </div>
+    <script>
+      (function () {
+        var params = new URLSearchParams(window.location.search);
+        var spec = params.get('spec');
+        var name = params.get('name') || (spec ? null : undefined);
+        var format = params.get('format');
+        window.__BETTER_OPENAPI_VIEWER_CONFIG__ = {
+          autoAddSpec: spec
+            ? {
+                url: spec,
+                name: name || undefined,
+                format: format === 'yaml' || format === 'json' ? format : 'auto',
+              }
+            : undefined,
+          persistAuthorization: true,
+        };
+      })();
+    </script>
+    <script src="./viewer.js"></script>
+  </body>
+</html>

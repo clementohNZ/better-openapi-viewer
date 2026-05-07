@@ -5,6 +5,7 @@ import {
   ApiCreatedResponse,
   ApiHeader,
   ApiOkResponse,
+  ApiOperation,
   ApiQuery,
   ApiSecurity,
   ApiTags,
@@ -15,6 +16,7 @@ import {
 @Controller('analytics')
 export class AnalyticsController {
   @Get('overview')
+  @ApiOperation({ summary: 'Get analytics overview' })
   @ApiQuery({ name: 'period', required: false, enum: ['today', 'week', 'month', 'quarter', 'year'], schema: { default: 'month' } })
   @ApiQuery({ name: 'compareWith', required: false, enum: ['previous_period', 'same_period_last_year'] })
   @ApiOkResponse({
@@ -44,6 +46,7 @@ export class AnalyticsController {
   }
 
   @Get('revenue')
+  @ApiOperation({ summary: 'Get revenue time series' })
   @ApiQuery({ name: 'from', required: true, schema: { type: 'string', format: 'date' } })
   @ApiQuery({ name: 'to', required: true, schema: { type: 'string', format: 'date' } })
   @ApiQuery({ name: 'granularity', required: false, enum: ['hour', 'day', 'week', 'month'], schema: { default: 'day' } })
@@ -262,6 +265,7 @@ export class AnalyticsController {
   }
 
   @Get('realtime')
+  @ApiOperation({ summary: 'Get realtime visitor metrics' })
   @ApiOkResponse({
     description: 'Realtime active visitor metrics.',
     schema: {

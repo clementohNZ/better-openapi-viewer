@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, Get, Headers, Param, Patch, Post, Query } from '@nestjs/common';
-import { ApiBearerAuth, ApiBody, ApiCreatedResponse, ApiHeader, ApiNoContentResponse, ApiOkResponse, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiBody, ApiCreatedResponse, ApiHeader, ApiNoContentResponse, ApiOkResponse, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 
 type CreateUserDto = {
   name: string;
@@ -13,6 +13,7 @@ type UpdateUserDto = Partial<CreateUserDto>;
 @Controller('users')
 export class UsersController {
   @Get()
+  @ApiOperation({ summary: 'List users' })
   @ApiQuery({ name: 'search', required: false })
   @ApiQuery({ name: 'role', enum: ['admin', 'member'], required: false })
   @ApiHeader({ name: 'x-request-id', required: false })
@@ -28,6 +29,7 @@ export class UsersController {
   }
 
   @Post()
+  @ApiOperation({ summary: 'Create a new user' })
   @ApiBearerAuth()
   @ApiBody({
     schema: {

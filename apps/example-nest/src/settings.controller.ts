@@ -6,6 +6,7 @@ import {
   ApiHeader,
   ApiNoContentResponse,
   ApiOkResponse,
+  ApiOperation,
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
@@ -15,6 +16,7 @@ import {
 @Controller('settings')
 export class SettingsController {
   @Get()
+  @ApiOperation({ summary: 'Get general settings' })
   @ApiOkResponse({
     description: 'General settings.',
     schema: {
@@ -57,6 +59,7 @@ export class SettingsController {
   }
 
   @Get('security')
+  @ApiOperation({ summary: 'Get security settings' })
   @ApiOkResponse({
     description: 'Security settings.',
     schema: {

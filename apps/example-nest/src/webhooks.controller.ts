@@ -6,6 +6,7 @@ import {
   ApiHeader,
   ApiNoContentResponse,
   ApiOkResponse,
+  ApiOperation,
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
@@ -15,6 +16,7 @@ import {
 @Controller('webhooks')
 export class WebhooksController {
   @Get()
+  @ApiOperation({ summary: 'List registered webhooks' })
   @ApiOkResponse({
     description: 'Registered webhooks.',
     schema: {
@@ -38,6 +40,7 @@ export class WebhooksController {
   }
 
   @Post()
+  @ApiOperation({ summary: 'Register a new webhook' })
   @ApiBody({
     schema: {
       type: 'object',
