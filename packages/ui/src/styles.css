@@ -1970,6 +1970,27 @@
     @apply flex items-start gap-2 text-[12px];
   }
 
+  .bov-required {
+    @apply font-semibold;
+    color: #b91c1c;
+  }
+
+  .bov[data-theme='dark'] .bov-required {
+    color: #fca5a5;
+  }
+
+  .bov-body-field {
+    @apply grid gap-1;
+  }
+
+  .bov-body-field-boolean {
+    @apply flex items-center gap-2;
+  }
+
+  .bov-body-field-boolean > input[type='checkbox'] {
+    @apply m-0;
+  }
+
   .bov-error {
     @apply m-0 text-[12px];
     color: #b91c1c;

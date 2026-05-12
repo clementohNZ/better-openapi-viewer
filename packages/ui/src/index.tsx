@@ -2055,7 +2055,7 @@ function TryItOut({
             {parameterFields.length ? (
               parameterFields.map((parameter) => (
                 <label key={`${parameter.in}:${parameter.name}`}>
-                  {parameter.name} ({parameter.in}){parameter.required ? ' required' : ''}
+                  {parameter.name} ({parameter.in}){parameter.required ? <span className="bov-required"> required</span> : null}
                   <input
                     value={state.parameters[parameter.name] ?? ''}
                     required={parameter.required}
@@ -2148,10 +2148,28 @@ function SchemaBodyFields({ bodyText, onChange, schema }: { bodyText: string; on
       {properties.map(([name, property]) => {
         const propertySchema = isSchemaObject(property) ? property : undefined;
         const value = bodyValue[name] ?? propertySchema?.default ?? '';
+        const isRequired = schema.required?.includes(name);
+        const isBoolean = getSchemaInputType(propertySchema) === 'boolean' && !propertySchema?.enum?.length;
+
+        if (isBoolean) {
+          return (
+            <div key={name} className="bov-body-field">
+              <label className="bov-body-field-boolean">
+                <SchemaInput schema={propertySchema} value={value} onChange={(nextValue) => updateProperty(name, nextValue)} />
+                <span>
+                  {name}
+                  {isRequired ? <span className="bov-required"> required</span> : null}
+                </span>
+              </label>
+              {propertySchema?.description ? <MarkdownText value={propertySchema.description} /> : null}
+            </div>
+          );
+        }
 
         return (
           <label key={name}>
-            {name}{schema.required?.includes(name) ? ' required' : ''}
+            {name}
+            {isRequired ? <span className="bov-required"> required</span> : null}
             <SchemaInput schema={propertySchema} value={value} onChange={(nextValue) => updateProperty(name, nextValue)} />
             {propertySchema?.description ? <MarkdownText value={propertySchema.description} /> : null}
           </label>
