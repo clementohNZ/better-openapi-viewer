@@ -340,7 +340,7 @@ Local preview:
 
 ```bash
 npm run dev --workspace standalone
-# then open http://localhost:4173
+# then open http://localhost:6003
 ```
 
 You can pre-load a spec via the URL:
@@ -486,11 +486,11 @@ npm run pack:check # dry-run npm pack for all publishable packages
 
 | Server | URL | Notes |
 |---|---|---|
-| `example-nest` — Better OpenAPI Viewer | http://localhost:3000/docs | The viewer being developed |
-| `example-nest` — Swagger UI | http://localhost:3000/swagger | Stock Swagger UI for comparison |
-| `example-nest` — OpenAPI JSON | http://localhost:3000/docs/openapi.json | Raw spec |
-| `standalone` | http://localhost:4173/ | Prebuilt browser bundle, no framework |
-| `example-ui` | http://localhost:4174/ | React component, bundled spec |
+| `example-nest` — Better OpenAPI Viewer | http://localhost:6002/docs | The viewer being developed |
+| `example-nest` — Swagger UI | http://localhost:6002/swagger | Stock Swagger UI for comparison |
+| `example-nest` — OpenAPI JSON | http://localhost:6002/docs/openapi.json | Raw spec |
+| `standalone` | http://localhost:6003/ | Prebuilt browser bundle, no framework |
+| `example-ui` | http://localhost:6004/ | React component, bundled spec |
 
 The `example-core` script is a one-shot CLI rather than a server, so it's excluded from the root `dev` task — run it on demand with `npm run dev --workspace example-core`.
 
@@ -498,10 +498,10 @@ The repo ships several example apps that each exercise a different layer of the 
 
 | App | What it shows | Run it |
 |---|---|---|
-| `apps/example-nest` | NestJS adapter mounted with 100+ demo endpoints, varied schemas, auth schemes, and header requirements. Viewer at `http://localhost:3000/docs`. | `npm run dev --workspace example-nest` |
+| `apps/example-nest` | NestJS adapter mounted with 100+ demo endpoints, varied schemas, auth schemes, and header requirements. Viewer at `http://localhost:6002/docs`. | `npm run dev --workspace example-nest` |
 | `apps/example-core` | Headless Node script — normalises a small inline spec, groups operations by tag, validates parameters, and prints curl/fetch snippets via the framework-agnostic core. | `npm run dev --workspace example-core` |
-| `apps/example-ui` | Minimal React app that imports `<BetterOpenApiViewer />` and renders a bundled `document` directly. Viewer at `http://localhost:4174`. | `npm run dev --workspace example-ui` |
-| `apps/standalone` | Static-site build of the prebuilt browser bundle (`viewer.js` + `viewer.css`), driven by `window.__BETTER_OPENAPI_VIEWER_CONFIG__`. Viewer at `http://localhost:4173`. | `npm run dev --workspace standalone` |
+| `apps/example-ui` | Minimal React app that imports `<BetterOpenApiViewer />` and renders a bundled `document` directly. Viewer at `http://localhost:6004`. | `npm run dev --workspace example-ui` |
+| `apps/standalone` | Static-site build of the prebuilt browser bundle (`viewer.js` + `viewer.css`), driven by `window.__BETTER_OPENAPI_VIEWER_CONFIG__`. Viewer at `http://localhost:6003`. | `npm run dev --workspace standalone` |
 
 ---
 

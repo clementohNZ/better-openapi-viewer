@@ -9,7 +9,7 @@ import webpack from 'webpack';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dist = path.join(root, 'dist');
 const serve = process.argv.includes('--serve');
-const port = Number(process.env.PORT ?? 4173);
+const port = Number(process.env.PORT ?? 6003);
 const require = createRequire(import.meta.url);
 
 await mkdir(dist, { recursive: true });

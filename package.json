@@ -4,7 +4,7 @@
   "packageManager": "pnpm@10.10.0",
   "scripts": {
     "build": "turbo run build",
-    "dev": "turbo run dev --parallel --filter=!example-core",
+    "dev": "turbo run dev --filter=!example-core",
     "lint": "turbo run lint",
     "pack:check": "pnpm run build && cd packages/core && npm pack --dry-run && cd ../ui && npm pack --dry-run && cd ../nestjs && npm pack --dry-run",
     "typecheck": "turbo run typecheck",

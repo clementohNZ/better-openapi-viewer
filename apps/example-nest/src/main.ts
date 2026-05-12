@@ -14,7 +14,7 @@ async function bootstrap() {
     .setVersion('0.0.0')
     .addBearerAuth()
     .addApiKey({ type: 'apiKey', in: 'header', name: 'x-api-key' }, 'apiKey')
-    .addServer('http://localhost:3000', 'Local development')
+    .addServer('http://localhost:6002', 'Local development')
     .addServer('/api', 'Relative API prefix')
     .build();
   const document = SwaggerModule.createDocument(app, config);
@@ -27,7 +27,7 @@ async function bootstrap() {
 
   SwaggerModule.setup('swagger', app, document);
 
-  await app.listen(process.env.PORT ? Number(process.env.PORT) : 3000);
+  await app.listen(process.env.PORT ? Number(process.env.PORT) : 6002);
 }
 
 void bootstrap();
