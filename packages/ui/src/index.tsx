@@ -378,7 +378,22 @@ function LoadedViewerApp({
   const showOnboarding = !preferences.onboardingCompleted;
   const openSettings = onOpenSettings;
   const operations = useMemo(() => sortOperations(getOperations(document), viewerConfig.operationsSorter), [document, viewerConfig.operationsSorter]);
-  const [selectedOperationId, setSelectedOperationId] = useState<string | null>(() => operations[0]?.id ?? null);
+  const [selectedOperationId, setSelectedOperationId] = useState<string | null>(() => {
+    const op = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('op') : null;
+    return (op && operations.some((o) => o.id === op)) ? op : (operations[0]?.id ?? null);
+  });
+  const [detailTab, setDetailTab] = useState<'docs' | 'try'>(() => {
+    const t = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('tab') : null;
+    return t === 'try' ? 'try' : 'docs';
+  });
+  const detailTabInitialized = useRef(false);
+  useEffect(() => {
+    if (!detailTabInitialized.current) {
+      detailTabInitialized.current = true;
+      return;
+    }
+    setDetailTab('docs');
+  }, [selectedOperationId]);
   const securitySchemes = useMemo(() => getSupportedSecuritySchemes(document), [document]);
   const componentSchemas = useMemo(() => getComponentSchemas(document), [document]);
   const specStorageId = activeSpecId ?? 'default';
@@ -425,8 +440,20 @@ function LoadedViewerApp({
     }
     return map;
   }, [document, operations]);
-  const methodOptions = useMemo(() => getCountedOptions(operations, (operation) => [operation.method]), [operations]);
-  const tagOptions = useMemo(() => getCountedOptions(operations, (operation) => operation.tags), [operations]);
+  const opsForMethodCounts = useMemo(() => {
+    if (viewerConfig.filter === false) return operations;
+    let result = filterOperations(operations, { query, tags: selectedTags, auth: authFilter, deprecated: deprecatedFilter === 'any' ? undefined : deprecatedFilter === 'deprecated', contentTypes: selectedContentTypes });
+    if (selectedModels.length) result = result.filter((op) => { const refs = operationModelRefs.get(op.id); return refs ? selectedModels.some((m) => refs.has(m)) : false; });
+    return result;
+  }, [authFilter, deprecatedFilter, operationModelRefs, operations, query, selectedContentTypes, selectedModels, selectedTags, viewerConfig.filter]);
+  const opsForTagCounts = useMemo(() => {
+    if (viewerConfig.filter === false) return operations;
+    let result = filterOperations(operations, { query, methods: selectedMethods, auth: authFilter, deprecated: deprecatedFilter === 'any' ? undefined : deprecatedFilter === 'deprecated', contentTypes: selectedContentTypes });
+    if (selectedModels.length) result = result.filter((op) => { const refs = operationModelRefs.get(op.id); return refs ? selectedModels.some((m) => refs.has(m)) : false; });
+    return result;
+  }, [authFilter, deprecatedFilter, operationModelRefs, operations, query, selectedContentTypes, selectedMethods, selectedModels, viewerConfig.filter]);
+  const methodOptions = useMemo(() => getCountedOptions(opsForMethodCounts, (operation) => [operation.method]), [opsForMethodCounts]);
+  const tagOptions = useMemo(() => getCountedOptions(opsForTagCounts, (operation) => operation.tags), [opsForTagCounts]);
   const contentTypeOptions = useMemo(() => getCountedOptions(operations, (operation) => operation.contentTypes), [operations]);
   const modelOptions = useMemo(
     () => getCountedOptions(operations, (operation) => [...(operationModelRefs.get(operation.id) ?? [])]),
@@ -579,10 +606,12 @@ function LoadedViewerApp({
     if (deprecatedFilter !== 'any') params.set('status', deprecatedFilter);
     if (selectedContentTypes.length) params.set('ct', selectedContentTypes.join(','));
     if (selectedModels.length) params.set('model', selectedModels.join(','));
+    if (selectedOperationId) params.set('op', selectedOperationId);
+    if (detailTab === 'try') params.set('tab', 'try');
     const search = params.toString();
     const next = search ? `?${search}${window.location.hash}` : window.location.hash ? window.location.hash : window.location.pathname;
     window.history.replaceState(null, '', next || window.location.pathname);
-  }, [query, selectedMethods, selectedTags, authFilter, deprecatedFilter, selectedContentTypes, selectedModels]);
+  }, [query, selectedMethods, selectedTags, authFilter, deprecatedFilter, selectedContentTypes, selectedModels, selectedOperationId, detailTab]);
 
   return (
     <main className="bov" data-theme={theme} data-mobile-view={mobileView}>
@@ -847,6 +876,8 @@ function LoadedViewerApp({
           securitySchemes={securitySchemes}
           onClose={closeDrawer}
           onBack={() => setMobileView('list')}
+          tab={detailTab}
+          onTabChange={setDetailTab}
         />
       </div>
       {showOnboarding ? (
@@ -964,6 +995,8 @@ function OperationDetailPanel({
   securitySchemes,
   onClose,
   onBack,
+  tab,
+  onTabChange,
 }: {
   operation: NormalizedOperation | null;
   document: OpenAPIObject;
@@ -978,13 +1011,13 @@ function OperationDetailPanel({
   securitySchemes: Record<string, SecuritySchemeObject>;
   onClose: () => void;
   onBack?: () => void;
+  tab: 'docs' | 'try';
+  onTabChange: (tab: 'docs' | 'try') => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [tab, setTab] = useState<'docs' | 'try'>('docs');
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: 0 });
-    setTab('docs');
   }, [operation?.id]);
 
   if (!operation) {
@@ -1027,10 +1060,10 @@ function OperationDetailPanel({
 
       {canTry ? (
         <div className="bov-detail-tabs" role="tablist">
-          <button role="tab" aria-selected={tab === 'docs'} className="bov-tab" data-active={tab === 'docs'} onClick={() => setTab('docs')}>
+          <button role="tab" aria-selected={tab === 'docs'} className="bov-tab" data-active={tab === 'docs'} onClick={() => onTabChange('docs')}>
             Reference
           </button>
-          <button role="tab" aria-selected={tab === 'try'} className="bov-tab" data-active={tab === 'try'} onClick={() => setTab('try')}>
+          <button role="tab" aria-selected={tab === 'try'} className="bov-tab" data-active={tab === 'try'} onClick={() => onTabChange('try')}>
             Try it out
           </button>
         </div>
@@ -2064,18 +2097,30 @@ function TryItOut({
           <fieldset>
             <legend>Parameters</legend>
             {parameterFields.length ? (
-              parameterFields.map((parameter) => (
-                <label key={`${parameter.in}:${parameter.name}`}>
-                  {parameter.name} ({parameter.in}){parameter.required ? <span className="bov-required"> required</span> : null}
-                  <input
-                    value={state.parameters[parameter.name] ?? ''}
-                    required={parameter.required}
-                    onChange={(event) => updateParameter(parameter.name, event.currentTarget.value)}
-                    aria-describedby={parameter.description ? `${toDomId(operation.id)}-${toDomId(parameter.name)}-description` : undefined}
-                  />
-                  {parameter.description ? <span id={`${toDomId(operation.id)}-${toDomId(parameter.name)}-description`}><MarkdownText value={parameter.description} /></span> : null}
-                </label>
-              ))
+              parameterFields.map((parameter) => {
+                const paramSchema = isSchemaObject(parameter.schema) ? parameter.schema : undefined;
+                const hasEnum = Boolean(paramSchema?.enum?.length);
+                return (
+                  <label key={`${parameter.in}:${parameter.name}`}>
+                    {parameter.name} ({parameter.in}){parameter.required ? <span className="bov-required"> required</span> : null}
+                    {hasEnum ? (
+                      <SchemaInput
+                        schema={paramSchema}
+                        value={state.parameters[parameter.name] ?? ''}
+                        onChange={(value) => updateParameter(parameter.name, String(value ?? ''))}
+                      />
+                    ) : (
+                      <input
+                        value={state.parameters[parameter.name] ?? ''}
+                        required={parameter.required}
+                        onChange={(event) => updateParameter(parameter.name, event.currentTarget.value)}
+                        aria-describedby={parameter.description ? `${toDomId(operation.id)}-${toDomId(parameter.name)}-description` : undefined}
+                      />
+                    )}
+                    {parameter.description ? <span id={`${toDomId(operation.id)}-${toDomId(parameter.name)}-description`}><MarkdownText value={parameter.description} /></span> : null}
+                  </label>
+                );
+              })
             ) : (
               <p>No editable parameters.</p>
             )}
@@ -2190,20 +2235,57 @@ function SchemaBodyFields({ bodyText, onChange, schema }: { bodyText: string; on
   );
 }
 
+function EnumSchemaInput({ onChange, schema, value }: { onChange: (value: unknown) => void; schema: SchemaObject; value: unknown }) {
+  const strValue = String(value ?? '');
+  const [isCustom, setIsCustom] = useState(() => Boolean(strValue && !schema.enum!.some((item) => String(item) === strValue)));
+
+  if (isCustom) {
+    return (
+      <div className="bov-enum-custom">
+        <input
+          value={strValue}
+          autoFocus
+          onChange={(event) => onChange(coerceSchemaValue(event.currentTarget.value, schema))}
+        />
+        <button
+          type="button"
+          className="bov-link-button"
+          onClick={() => { onChange(''); setIsCustom(false); }}
+        >
+          Use preset
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <select
+      value={strValue}
+      onChange={(event) => {
+        if (event.currentTarget.value === '__custom__') {
+          onChange('');
+          setIsCustom(true);
+        } else {
+          onChange(coerceSchemaValue(event.currentTarget.value, schema));
+        }
+      }}
+    >
+      <option value="">Select value</option>
+      {schema.enum!.map((item) => (
+        <option key={String(item)} value={String(item)}>
+          {String(item)}
+        </option>
+      ))}
+      <option value="__custom__">Add new value…</option>
+    </select>
+  );
+}
+
 function SchemaInput({ onChange, schema, value }: { onChange: (value: unknown) => void; schema?: SchemaObject; value: unknown }) {
   const type = getSchemaInputType(schema);
 
   if (schema?.enum?.length) {
-    return (
-      <select value={String(value ?? '')} onChange={(event) => onChange(coerceSchemaValue(event.currentTarget.value, schema))}>
-        <option value="">Select value</option>
-        {schema.enum.map((item) => (
-          <option key={String(item)} value={String(item)}>
-            {String(item)}
-          </option>
-        ))}
-      </select>
-    );
+    return <EnumSchemaInput onChange={onChange} schema={schema} value={value} />;
   }
 
   if (type === 'boolean') {

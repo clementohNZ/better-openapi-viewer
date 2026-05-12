@@ -1989,6 +1989,14 @@
     color: #fca5a5;
   }
 
+  .bov-enum-custom {
+    @apply flex items-center gap-2;
+  }
+
+  .bov-enum-custom > input {
+    @apply flex-1 m-0;
+  }
+
   .bov-body-field {
     @apply grid gap-1;
   }
