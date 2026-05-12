@@ -1,6 +1,6 @@
 {
   "name": "@clementoh/better-openapi-viewer-ui",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "React UI for Better OpenAPI Viewer.",
   "type": "module",
   "license": "MIT",
