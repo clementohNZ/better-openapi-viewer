@@ -614,7 +614,18 @@ function LoadedViewerApp({
                 </svg>
               </button>
             </div>
-            <p className="bov-kicker">API Reference</p>
+            <div className="bov-kicker-row">
+              <p className="bov-kicker">API Reference</p>
+              <iframe
+                className="bov-product-github-star"
+                src="https://ghbtns.com/github-btn.html?user=clementohNZ&repo=better-openapi-viewer&type=star&count=true&size=small"
+                title="Star clementohNZ/better-openapi-viewer on GitHub"
+                frameBorder={0}
+                scrolling="0"
+                width="80"
+                height="20"
+              />
+            </div>
             <h1>{document.info?.title ?? 'OpenAPI'}</h1>
             <p className="bov-version">v{document.info?.version ?? '—'}</p>
             {document.info?.description ? <div className="bov-description"><MarkdownText value={document.info.description} /></div> : null}

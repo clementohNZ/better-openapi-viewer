@@ -1340,6 +1340,16 @@
     @apply min-w-0 flex-1;
   }
 
+  .bov-kicker-row {
+    @apply flex items-center justify-between gap-2;
+  }
+
+  .bov-product-github-star {
+    @apply shrink-0;
+    border: 0;
+    color-scheme: light;
+  }
+
   .bov-product-gear {
     @apply inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-[6px] border bg-transparent transition-colors;
     border-color: transparent;
