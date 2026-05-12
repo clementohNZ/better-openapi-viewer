@@ -488,6 +488,7 @@ npm run pack:check # dry-run npm pack for all publishable packages
 |---|---|---|
 | `example-nest` — Better OpenAPI Viewer | http://localhost:6002/docs | The viewer being developed |
 | `example-nest` — Swagger UI | http://localhost:6002/swagger | Stock Swagger UI for comparison |
+| `example-nest` — Scalar API Reference | http://localhost:6002/scalar | Scalar API reference for comparison |
 | `example-nest` — OpenAPI JSON | http://localhost:6002/docs/openapi.json | Raw spec |
 | `standalone` | http://localhost:6003/ | Prebuilt browser bundle, no framework |
 | `example-ui` | http://localhost:6004/ | React component, bundled spec |

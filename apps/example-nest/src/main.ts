@@ -2,6 +2,7 @@ import 'reflect-metadata';
 
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { apiReference } from '@scalar/nestjs-api-reference';
 import { setupBetterOpenApiViewer } from '@clementoh/better-openapi-viewer-nestjs';
 import { AppModule } from './app.module.js';
 
@@ -26,6 +27,8 @@ async function bootstrap() {
   });
 
   SwaggerModule.setup('swagger', app, document);
+
+  app.use('/scalar', apiReference({ url: '/docs/openapi.json' }));
 
   await app.listen(process.env.PORT ? Number(process.env.PORT) : 6002);
 }
