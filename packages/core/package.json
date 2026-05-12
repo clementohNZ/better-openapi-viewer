@@ -1,6 +1,6 @@
 {
   "name": "@clementoh/better-openapi-viewer-core",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Framework-agnostic OpenAPI normalization and viewer primitives.",
   "type": "module",
   "license": "MIT",
